@@ -163,7 +163,10 @@ function parseTask(file: TFile, fm: TaskFrontmatter, requiredTag: string): Task 
 
 	return {
 		file,
-		title: fm.title || file.basename,
+		// A purely numeric title (e.g. "123") is parsed by YAML as a number,
+		// not a string - String() it explicitly so later string methods
+		// (localeCompare in sortRowsInPlace, etc.) never crash on it.
+		title: fm.title ? String(fm.title) : file.basename,
 		status: normalizeStatus(fm.status), // raw value, resolved against settings.statuses at point of use
 		priority: normalizePriority(fm.priority),
 		scheduled: fm.scheduled ? String(fm.scheduled).slice(0, 10) : undefined,
@@ -706,6 +709,7 @@ const TRANSLATIONS = {
 		errorCreateFailed: "Aufgabe konnte nicht angelegt werden",
 		errorSaveFailed: "Aufgabe konnte nicht gespeichert werden",
 		errorDeleteFailed: "Aufgabe konnte nicht gelöscht werden",
+		errorRenderFailed: "Plain Tasks: Anzeige fehlgeschlagen",
 		openTasks: "Aufgaben öffnen",
 		taskListViewName: "Aufgaben",
 		settingsFolderName: "Ordner für Aufgaben-Notizen",
@@ -792,6 +796,7 @@ const TRANSLATIONS = {
 		errorCreateFailed: "Could not create task",
 		errorSaveFailed: "Could not save task",
 		errorDeleteFailed: "Could not delete task",
+		errorRenderFailed: "Plain Tasks: failed to render view",
 		openTasks: "Open tasks",
 		taskListViewName: "Tasks",
 		settingsFolderName: "Folder for task notes",
@@ -2050,6 +2055,18 @@ class TaskListView extends ItemView {
 	}
 
 	private render() {
+		try {
+			this.renderInner();
+		} catch (err) {
+			// A render bug (e.g. bad frontmatter in one note) would otherwise
+			// leave a silent, unexplained blank view with no way to diagnose it
+			// without devtools access. Surface it as a Notice instead.
+			console.error("Plain Tasks:", err);
+			new Notice(t("errorRenderFailed") + (err instanceof Error ? `: ${err.message}` : ""));
+		}
+	}
+
+	private renderInner() {
 		const container = this.containerEl.children[1] as HTMLElement;
 		container.empty();
 		container.addClass("plain-tasks-view");

@@ -1,6 +1,6 @@
 {
   "name": "plain-tasks",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "A minimal task list plugin for your own task notes - no databases, no projects UI, just plain notes",
   "main": "main.js",
   "scripts": {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.1
+
+- Fixed: a task note with a purely numeric `title` (e.g. `title: 123`, parsed by YAML as a number rather than a string) crashed the entire view render (`localeCompare is not a function` while sorting), leaving every view mode silently blank with no visible way to create a task either. Titles are now always coerced to a string
+- Added: a render failure now shows a Notice instead of silently leaving a blank view, so a future bug like this is diagnosable without devtools access
+
 ## 1.6.0
 
 - Added: statuses are now fully configurable in settings - a reorderable list of status IDs, each with a "done" toggle (exactly one is active at a time). The default (`open`, `in-progress`, `blocked`, `done`, with `done` marked as done) matches the old hard-coded set exactly, so existing task notes keep working unchanged without any migration

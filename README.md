@@ -141,6 +141,7 @@ Under the hood this is stored in `recurrence` as an RRULE-lite string (same synt
 - 🏷️ **Tag for tasks** — the frontmatter tag that marks a note as a task (default: `task`)
 - 📁 **Folder for auto-created project notes** — where new project notes are written when a task's `project` value doesn't resolve to one (default: `projects`); doesn't affect detection of existing project notes, which stays purely frontmatter-based (`type: project`)
 - 🧩 **Statuses** — a reorderable list of status IDs (default: `open`, `in-progress`, `blocked`, `done`). Each entry has a "done" toggle (exactly one can be active), up/down buttons to reorder (this determines column/section order), and a delete button (disabled once only one status is left). Renaming or deleting a status doesn't retroactively touch existing task notes - see "Statuses and the All Kanban board" above for the fallback behaviour on unknown values.
+- 🗓️ **Show tasks in calendar** — off by default; when on and [Plain Calendar](https://github.com/janschikorr/obsidian-plain-calendar) is installed, every task with a `due` date shows up there as a read-only entry (not expanded for recurring tasks - only the stored `due` date). See Plain Calendar's README for details.
 
 ## 🗺️ Roadmap
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.0
+
+- Added: "Show tasks in calendar" setting (off by default). When on and Plain Calendar is installed, every task with a `due` date shows up there as a read-only entry - Plain Calendar reads this setting directly, no action needed here beyond turning it on
+
 ## 1.7.0
 
 - Changed: Project mode with no project selected no longer shows a "pick a project" hint - it now shows every task grouped by its own resolved project instead (alphabetically, `[[foo]]` and `[[foo|Bar]]` still counted as one project), with a trailing "No project" group for tasks that don't have one. Selecting an actual project from the dropdown still switches to the normal status-grouped, filtered list as before

@@ -45,6 +45,12 @@ interface TaskSettings {
 	// task notes keep working unchanged - see statusIdFor/doneStatusId for
 	// how an unknown/removed status value on an existing note is handled.
 	statuses: StatusConfig[];
+	// Whether Plain Calendar (a sister plugin, may not be installed) should
+	// show tasks with a `due` date as read-only virtual entries alongside its
+	// own events. Off by default - opt-in, since it changes another plugin's
+	// view. Plain Calendar reads this directly via
+	// `app.plugins.plugins["plain-tasks"].settings`, see its README.
+	showInCalendar: boolean;
 }
 
 const DEFAULT_SETTINGS: TaskSettings = {
@@ -59,6 +65,7 @@ const DEFAULT_SETTINGS: TaskSettings = {
 		{ id: "blocked", done: false },
 		{ id: "done", done: true },
 	],
+	showInCalendar: false,
 };
 
 // The raw frontmatter `status` value - any string, not a fixed union anymore
@@ -727,6 +734,9 @@ const TRANSLATIONS = {
 		settingsStatusMoveDown: "Nach unten verschieben",
 		settingsStatusDelete: "Status löschen",
 		settingsAddStatus: "Status hinzufügen",
+		settingsShowInCalendarName: "Aufgaben im Kalender anzeigen",
+		settingsShowInCalendarDesc:
+			"Zeigt Aufgaben mit einem Fälligkeitsdatum (due) als schreibgeschützte Einträge in Plain Calendar an, falls installiert.",
 		contextMenuChangeStatusLabel: "Status ändern zu",
 		scopeQuestionTitle: "Diese Änderung betrifft…",
 		scopeThisTask: "Nur diese Aufgabe",
@@ -814,6 +824,9 @@ const TRANSLATIONS = {
 		settingsStatusMoveDown: "Move down",
 		settingsStatusDelete: "Delete status",
 		settingsAddStatus: "Add status",
+		settingsShowInCalendarName: "Show tasks in calendar",
+		settingsShowInCalendarDesc:
+			"Shows tasks with a due date as read-only entries in Plain Calendar, if installed.",
 		contextMenuChangeStatusLabel: "Change status to",
 		scopeQuestionTitle: "This change applies to…",
 		scopeThisTask: "This task only",
@@ -2346,6 +2359,16 @@ class TaskSettingTab extends PluginSettingTab {
 			.addText((text) =>
 				text.setValue(this.plugin.settings.projectsFolder).onChange(async (value) => {
 					this.plugin.settings.projectsFolder = value.trim() || DEFAULT_SETTINGS.projectsFolder;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName(t("settingsShowInCalendarName"))
+			.setDesc(t("settingsShowInCalendarDesc"))
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showInCalendar).onChange(async (value) => {
+					this.plugin.settings.showInCalendar = value;
 					await this.plugin.saveSettings();
 				})
 			);

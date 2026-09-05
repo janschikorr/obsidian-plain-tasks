@@ -15,14 +15,23 @@ import {
 
 const VIEW_TYPE_TASKS = "plain-tasks-view";
 
+// Which subset of rows the list view shows before applying the fixed
+// Overdue/Open/In Progress/Blocked/Done grouping. "all" is the original,
+// unfiltered behaviour; "today" and "project" narrow the row set down.
+type TaskViewMode = "all" | "today" | "project";
+
 interface TaskSettings {
 	tasksFolder: string;
 	taskTag: string;
+	viewMode: TaskViewMode;
+	viewProject: string;
 }
 
 const DEFAULT_SETTINGS: TaskSettings = {
 	tasksFolder: "Tasks",
 	taskTag: "task",
+	viewMode: "all",
+	viewProject: "",
 };
 
 type TaskStatus = "open" | "in-progress" | "blocked" | "done";
@@ -313,6 +322,43 @@ function buildTaskRows(tasks: Task[], index: SeriesIndex, todayKey: string): Tas
 	return rows;
 }
 
+// `project` is a free-text field that may contain a wikilink (e.g.
+// "[[Projects/Foo|Foo Bar]]"). For display in the project filter dropdown we
+// want the readable target text, not the raw markup or the alias - anything
+// that isn't a bare wikilink (plain free text) is shown as-is.
+function projectDisplayText(raw: string): string {
+	const match = raw.match(/^\[\[(.+)\]\]$/);
+	if (!match) return raw;
+	const inner = match[1];
+	const pipeIdx = inner.indexOf("|");
+	return pipeIdx >= 0 ? inner.slice(0, pipeIdx) : inner;
+}
+
+// Distinct `project` values across the currently loaded tasks, alphabetically
+// sorted by their readable display text (see projectDisplayText).
+function distinctProjects(tasks: Task[]): string[] {
+	const values = new Set<string>();
+	for (const task of tasks) {
+		if (task.project) values.add(task.project);
+	}
+	return Array.from(values).sort((a, b) => projectDisplayText(a).localeCompare(projectDisplayText(b)));
+}
+
+// Vorfilter for the "today" view mode: due today-or-earlier (so overdue tasks
+// aren't hidden) or scheduled for today. Done rows are the exception - they
+// only qualify if they were actually due/scheduled *today* (not merely
+// overdue-and-done), so the today view doesn't silently fill up with old
+// completed occurrences. Uses the row's effective (recurrence-resolved) due
+// date, not the series master's original `due`.
+function matchesToday(row: TaskRow, todayKey: string): boolean {
+	const due = row.effectiveDue;
+	const scheduled = row.display.scheduled;
+	if (row.display.status === "done") {
+		return due === todayKey || scheduled === todayKey;
+	}
+	return (due !== undefined && due <= todayKey) || scheduled === todayKey;
+}
+
 function groupFor(row: TaskRow, todayKey: string): TaskGroup {
 	if (row.display.status === "done") return "done";
 	if (row.effectiveDue && row.effectiveDue < todayKey) return "overdue";
@@ -426,6 +472,11 @@ const TRANSLATIONS = {
 		scopeSeries: "Die ganze Serie",
 		scopeSeriesDesc: "Ändert das Muster für alle Vorkommen der Serie.",
 		emptyState: "Keine Aufgaben in diesem Ordner.",
+		viewModeAll: "Alle",
+		viewModeToday: "Heute",
+		viewModeProject: "Projekt",
+		projectFilterPlaceholder: "Projekt wählen…",
+		projectEmptyState: "Wähle ein Projekt aus, um Aufgaben zu sehen.",
 	},
 	en: {
 		groupOverdue: "Overdue",
@@ -500,6 +551,11 @@ const TRANSLATIONS = {
 		scopeSeries: "The entire series",
 		scopeSeriesDesc: "Changes the pattern for every occurrence in the series.",
 		emptyState: "No tasks in this folder.",
+		viewModeAll: "All",
+		viewModeToday: "Today",
+		viewModeProject: "Project",
+		projectFilterPlaceholder: "Choose a project…",
+		projectEmptyState: "Select a project to see tasks.",
 	},
 } as const;
 
@@ -1405,6 +1461,65 @@ class TaskListView extends ItemView {
 		menu.showAtMouseEvent(e);
 	}
 
+	// Applies the view mode as a pre-filter on the full row set, before the
+	// fixed Overdue/Open/In Progress/Blocked/Done grouping runs. "all" is a
+	// no-op; "today"/"project" narrow the rows shown, they never change how
+	// the surviving rows are grouped.
+	private filterRowsForMode(rows: TaskRow[], todayKey: string): TaskRow[] {
+		const mode = this.plugin.settings.viewMode;
+		if (mode === "today") return rows.filter((row) => matchesToday(row, todayKey));
+		if (mode === "project") {
+			const project = this.plugin.settings.viewProject;
+			if (!project) return [];
+			return rows.filter((row) => row.display.project === project);
+		}
+		return rows;
+	}
+
+	private async setViewMode(mode: TaskViewMode) {
+		if (this.plugin.settings.viewMode === mode) return;
+		this.plugin.settings.viewMode = mode;
+		await this.plugin.saveSettings();
+		this.render();
+	}
+
+	private async setViewProject(project: string) {
+		if (this.plugin.settings.viewProject === project) return;
+		this.plugin.settings.viewProject = project;
+		await this.plugin.saveSettings();
+		this.render();
+	}
+
+	private renderModeBar(container: HTMLElement, projects: string[]) {
+		const bar = container.createDiv({ cls: "plain-tasks-mode-bar" });
+		const switcher = bar.createDiv({ cls: "plain-tasks-mode-switch" });
+
+		const modes: { mode: TaskViewMode; label: TranslationKey }[] = [
+			{ mode: "all", label: "viewModeAll" },
+			{ mode: "today", label: "viewModeToday" },
+			{ mode: "project", label: "viewModeProject" },
+		];
+
+		for (const { mode, label } of modes) {
+			const isActive = this.plugin.settings.viewMode === mode;
+			const btn = switcher.createEl("button", {
+				text: t(label),
+				cls: "plain-tasks-mode-btn" + (isActive ? " is-active" : ""),
+			});
+			btn.onclick = () => this.setViewMode(mode);
+		}
+
+		if (this.plugin.settings.viewMode === "project") {
+			const select = bar.createEl("select", { cls: "plain-tasks-project-select" });
+			select.createEl("option", { text: t("projectFilterPlaceholder"), value: "" });
+			for (const project of projects) {
+				select.createEl("option", { text: projectDisplayText(project), value: project });
+			}
+			select.value = projects.includes(this.plugin.settings.viewProject) ? this.plugin.settings.viewProject : "";
+			select.onchange = () => this.setViewProject(select.value);
+		}
+	}
+
 	private render() {
 		const container = this.containerEl.children[1] as HTMLElement;
 		container.empty();
@@ -1413,17 +1528,21 @@ class TaskListView extends ItemView {
 		this.tasks = this.loadTasks();
 		this.seriesIndex = buildSeriesIndex(this.tasks);
 		const todayKey = toDateKey(new Date());
-		const rows = buildTaskRows(this.tasks, this.seriesIndex, todayKey);
+		const allRows = buildTaskRows(this.tasks, this.seriesIndex, todayKey);
+		const rows = this.filterRowsForMode(allRows, todayKey);
 
 		const toolbar = container.createDiv({ cls: "plain-tasks-toolbar" });
 		toolbar.createEl("span", { cls: "plain-tasks-title", text: t("taskListViewName") });
 		const newBtn = toolbar.createEl("button", { text: t("newTaskButton"), cls: "plain-tasks-new-btn" });
 		newBtn.onclick = () => this.createTask();
 
+		this.renderModeBar(container, distinctProjects(this.tasks));
+
 		const body = container.createDiv({ cls: "plain-tasks-body" });
 
 		if (rows.length === 0) {
-			body.createDiv({ cls: "plain-tasks-empty", text: t("emptyState") });
+			const emptyText = this.plugin.settings.viewMode === "project" ? t("projectEmptyState") : t("emptyState");
+			body.createDiv({ cls: "plain-tasks-empty", text: emptyText });
 			return;
 		}
 

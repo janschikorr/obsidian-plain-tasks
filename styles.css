@@ -28,6 +28,49 @@
 	background-color: var(--interactive-accent-hover);
 }
 
+.plain-tasks-mode-bar {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-3);
+}
+
+.plain-tasks-mode-switch {
+	display: inline-flex;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	overflow: hidden;
+}
+
+.plain-tasks-mode-btn {
+	cursor: pointer;
+	background-color: var(--background-secondary);
+	color: var(--text-muted);
+	border: none;
+	border-radius: 0;
+	padding: var(--size-4-1) var(--size-4-3);
+	box-shadow: none;
+}
+
+.plain-tasks-mode-btn:not(:last-child) {
+	border-right: 1px solid var(--background-modifier-border);
+}
+
+.plain-tasks-mode-btn:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.plain-tasks-mode-btn.is-active {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.plain-tasks-project-select {
+	flex: 0 1 auto;
+}
+
 .plain-tasks-body {
 	flex: 1;
 	min-height: 0;

@@ -1,7 +1,7 @@
 {
 	"id": "plain-tasks",
 	"name": "Plain Tasks",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"minAppVersion": "1.12.0",
 	"description": "A minimal task list (overdue/open/in progress/blocked/done) for your own task notes, with recurrence anchored to the due date - no databases, no projects UI.",
 	"author": "Jan Schikorr",

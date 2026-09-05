@@ -13,6 +13,7 @@ Existing task plugins tend to come with their own query language, kanban boards,
 ## ✨ Features
 
 - 📋 **One fixed grouping** — Overdue, Open, In Progress, Blocked, Done, always in that order
+- 🔀 **All / Today / Project view modes** — a switcher above the list narrows down which rows are shown before they're grouped; the grouping itself never changes
 - 📄 **Tasks are notes** — every task is a regular markdown file with frontmatter, so it's just as searchable, linkable, and versionable as the rest of your vault
 - ☑️ **Checkbox in the list** — check off a task right from the list, no need to open the note
 - 🔁 **Recurring tasks** — daily/weekly/monthly/yearly, anchored on the **due** date, with an optional interval, end date, or occurrence count
@@ -52,6 +53,16 @@ Open the task list via the ribbon icon or the **Open tasks** command.
 - ☑️ Click the checkbox → complete (or reopen) a task
 - ✏️ Click a task row → edit it; right-click it → edit/delete
 - ➕ **New task** button in the toolbar → create a task
+
+### 🔀 View modes
+
+A segmented control above the list switches between three view modes. In every mode, the fixed Overdue/Open/In Progress/Blocked/Done grouping stays exactly as-is — the mode only decides which rows make it into that grouping in the first place:
+
+- **All** — every task, the original unfiltered behaviour
+- **Today** — only tasks due today-or-earlier (so overdue tasks stay visible) or scheduled for today; a `done` task only shows up here if it was actually due/scheduled today, not just any overdue-and-done task
+- **Project** — a dropdown next to the switcher lists every distinct `project` value among the currently loaded tasks (wikilinks are shown by their readable target text); pick one to see only tasks with that exact `project` value. With no project selected (or none existing yet), the list shows a hint instead of an error
+
+The chosen mode and project selection are remembered in the plugin's settings and restored the next time the view opens.
 
 ## 📝 Task notes
 
@@ -99,8 +110,8 @@ Under the hood this is stored in `recurrence` as an RRULE-lite string (same synt
 
 Known v1 limitations, kept simple on purpose:
 
-- `project` is a free-text field shown as a chip, not a real grouping level (no dedicated "group by project" view) and has no autocomplete against existing projects yet — typos create a new, separate project chip.
-- No search or filtering beyond the fixed status grouping.
+- `project` is a free-text field shown as a chip, not a real grouping level (no dedicated "group by project" view, only the Project view mode's single-value filter) and has no autocomplete against existing projects yet — typos create a new, separate project value.
+- No free-text search, and no filtering beyond the All/Today/Project view modes.
 
 ## 📄 License
 

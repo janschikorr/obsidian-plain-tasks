@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0
+
+- Added: Today and Project view modes for the task list, alongside the existing "All" view - a segmented control switches between them, and Project mode adds a dropdown of the distinct `project` values in the current task set
+- The fixed Overdue/Open/In Progress/Blocked/Done grouping is unchanged in every mode; the mode only pre-filters which rows are shown before grouping
+- The selected view mode and project selection are persisted in plugin settings and restored when the view is reopened
+
 ## 1.0.0
 
 Initial release.

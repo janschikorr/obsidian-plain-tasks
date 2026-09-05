@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.0
+
+- Changed: Project mode with no project selected no longer shows a "pick a project" hint - it now shows every task grouped by its own resolved project instead (alphabetically, `[[foo]]` and `[[foo|Bar]]` still counted as one project), with a trailing "No project" group for tasks that don't have one. Selecting an actual project from the dropdown still switches to the normal status-grouped, filtered list as before
+
 ## 1.6.4
 
 - Added: below ~360px of pane width, the Kanban board switches from horizontally-scrolling columns to full-width columns stacked on top of each other (like a mobile Kanban app), since side-by-side columns stop being usable that narrow no matter how much they shrink

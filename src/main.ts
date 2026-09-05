@@ -741,7 +741,7 @@ const TRANSLATIONS = {
 		viewModeProject: "Projekt",
 		todayButton: "Heute",
 		projectFilterPlaceholder: "Projekt wählen…",
-		projectEmptyState: "Wähle ein Projekt aus, um Aufgaben zu sehen.",
+		noProjectGroup: "Ohne Projekt",
 		projectNotFoundSuffix: "nicht gefunden",
 		projectWillCreateHint: 'Neues Projekt „{title}" wird beim Speichern angelegt',
 		projectCreatedNotice: 'Projekt „{title}" angelegt',
@@ -828,7 +828,7 @@ const TRANSLATIONS = {
 		viewModeProject: "Project",
 		todayButton: "Today",
 		projectFilterPlaceholder: "Choose a project…",
-		projectEmptyState: "Select a project to see tasks.",
+		noProjectGroup: "No project",
 		projectNotFoundSuffix: "not found",
 		projectWillCreateHint: 'A new project "{title}" will be created on save',
 		projectCreatedNotice: 'Project "{title}" created',
@@ -2080,9 +2080,13 @@ class TaskListView extends ItemView {
 		// row set (buildTaskRowsForDay) so the list actually changes as you
 		// navigate; viewing the real today keeps the original rolling
 		// backlog/triage behaviour (buildTaskRows + matchesToday) unchanged.
+		const viewMode = this.plugin.settings.viewMode;
+		const showAllGroupedByProject = viewMode === "project" && !this.plugin.settings.viewProject;
 		const rows =
-			this.plugin.settings.viewMode === "today" && this.viewDate !== todayKey
+			viewMode === "today" && this.viewDate !== todayKey
 				? buildTaskRowsForDay(this.tasks, this.seriesIndex, this.viewDate)
+				: showAllGroupedByProject
+				? buildTaskRows(this.tasks, this.seriesIndex, todayKey, statuses)
 				: this.filterRowsForMode(buildTaskRows(this.tasks, this.seriesIndex, todayKey, statuses));
 
 		this.renderModeBar(container, distinctProjectOptions(this.app, this.tasks));
@@ -2095,17 +2099,21 @@ class TaskListView extends ItemView {
 		body.oncontextmenu = (e) => this.showCreateContextMenu(e);
 
 		if (rows.length === 0) {
-			const emptyText = this.plugin.settings.viewMode === "project" ? t("projectEmptyState") : t("emptyState");
-			body.createDiv({ cls: "plain-tasks-empty", text: emptyText });
+			body.createDiv({ cls: "plain-tasks-empty", text: t("emptyState") });
 			return;
 		}
 
-		if (this.plugin.settings.viewMode === "all") {
+		if (viewMode === "all") {
 			this.renderBoard(body, rows, todayKey);
 			return;
 		}
 
-		// Today/Project modes stay a list, sectioned by the configured
+		if (showAllGroupedByProject) {
+			this.renderGroupedByProject(body, rows, todayKey);
+			return;
+		}
+
+		// Today/Project (with a project selected) stay a list, sectioned by the configured
 		// statuses (in configured order) instead of the old fixed
 		// Overdue/Open/In Progress/Blocked/Done grouping. "Overdue" is no
 		// longer a group of its own - see isRowOverdue, applied per-row below.
@@ -2131,6 +2139,46 @@ class TaskListView extends ItemView {
 			for (const row of rowsInGroup) {
 				this.renderRow(list, row, todayKey, doneId);
 			}
+		}
+	}
+
+	// Project mode with no project selected yet: instead of the old "pick a
+	// project first" empty state, show every task sectioned by its resolved
+	// project (see projectOptionFor - two different-looking wikilinks to the
+	// same note count as one group), sorted alphabetically by display name,
+	// with a trailing "no project" group for tasks that have none. Picking an
+	// actual project from the dropdown switches back to the normal
+	// status-sectioned list, filtered to just that project.
+	private renderGroupedByProject(body: HTMLElement, rows: TaskRow[], todayKey: string) {
+		const doneId = doneStatusId(this.plugin.settings.statuses);
+		const noProjectKey = "__no_project__";
+		const groups = new Map<string, { label: string; rows: TaskRow[] }>();
+
+		for (const row of rows) {
+			const raw = row.display.project;
+			const option = raw ? projectOptionFor(this.app, raw, row.display.file.path) : null;
+			const key = option ? option.key : noProjectKey;
+			const label = option ? option.display : t("noProjectGroup");
+			let group = groups.get(key);
+			if (!group) {
+				group = { label, rows: [] };
+				groups.set(key, group);
+			}
+			group.rows.push(row);
+		}
+
+		const projectGroups = Array.from(groups.entries())
+			.filter(([key]) => key !== noProjectKey)
+			.sort((a, b) => a[1].label.localeCompare(b[1].label));
+		const noProjectGroup = groups.get(noProjectKey);
+		const orderedGroups = noProjectGroup ? [...projectGroups, [noProjectKey, noProjectGroup] as const] : projectGroups;
+
+		for (const [, group] of orderedGroups) {
+			sortRowsInPlace(group.rows);
+			const section = body.createDiv({ cls: "plain-tasks-group" });
+			section.createDiv({ cls: "plain-tasks-group-head", text: `${group.label} (${group.rows.length})` });
+			const list = section.createDiv({ cls: "plain-tasks-list" });
+			for (const row of group.rows) this.renderRow(list, row, todayKey, doneId);
 		}
 	}
 

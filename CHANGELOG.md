@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0
+
+- Changed: Today mode is now a navigable day instead of a hard-coded "today" - a day-navigation pill (`‹` / Today / `›`) with the selected day's title appears on the left of the mode bar whenever Today mode is active, matching Plain Calendar's toolbar. Tasks due on-or-before, or scheduled for, the selected day are shown; the fixed Overdue/Open/In Progress/Blocked/Done grouping stays relative to the real today, only the pre-filter moves with the selected day. The selected day is transient and resets to the real today on reopen, not persisted in settings
+- Changed: the All/Today/Project mode switcher is now styled as a round pill (matching Plain Calendar's segmented control) instead of a square bordered button group
+
 ## 1.3.0
 
 - Added: if a task's `project` value doesn't resolve to an existing `type: project` note, saving the task (create or edit, any recurrence scope) always creates one automatically - no confirmation prompt - and rewrites `project` to a clean wikilink to it

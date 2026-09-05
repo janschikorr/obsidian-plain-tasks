@@ -503,6 +503,23 @@ function addYears(d: Date, n: number): Date {
 	return copy;
 }
 
+// Month names come from Obsidian's own moment instance, which is already set
+// to the app's language (see currentLang below for the two supported UI
+// languages) - matches Plain Calendar's monthNames/shortWeekdayLabel helpers.
+function monthNames(): string[] {
+	return moment.months();
+}
+
+function shortWeekdayLabel(d: Date): string {
+	return moment(d).format("dd");
+}
+
+// Title shown next to the day-navigation pill in the "today" view mode - same
+// format as Plain Calendar's day-mode title.
+function titleForDate(d: Date): string {
+	return `${shortWeekdayLabel(d)}, ${d.getDate()}. ${monthNames()[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 // UI language: German only when Obsidian's moment locale is "de", English
 // otherwise (not full i18n, just these two languages). The frontmatter field
 // names (title/status/priority/scheduled/due/...) are unaffected by this -
@@ -586,6 +603,7 @@ const TRANSLATIONS = {
 		viewModeAll: "Alle",
 		viewModeToday: "Heute",
 		viewModeProject: "Projekt",
+		todayButton: "Heute",
 		projectFilterPlaceholder: "Projekt wählen…",
 		projectEmptyState: "Wähle ein Projekt aus, um Aufgaben zu sehen.",
 		projectNotFoundSuffix: "nicht gefunden",
@@ -671,6 +689,7 @@ const TRANSLATIONS = {
 		viewModeAll: "All",
 		viewModeToday: "Today",
 		viewModeProject: "Project",
+		todayButton: "Today",
 		projectFilterPlaceholder: "Choose a project…",
 		projectEmptyState: "Select a project to see tasks.",
 		projectNotFoundSuffix: "not found",
@@ -1082,6 +1101,12 @@ class TaskListView extends ItemView {
 	plugin: PlainTasksPlugin;
 	private tasks: Task[] = [];
 	private seriesIndex: SeriesIndex = { exceptionsBySeriesDate: new Map(), exceptionsBySeries: new Map(), mastersByPath: new Map() };
+	// Which day the "today" view mode is showing - transient (not persisted in
+	// settings), defaults to the real today on every open, same as Plain
+	// Calendar's `anchor`. Only affects the "today" mode's pre-filter (see
+	// filterRowsForMode/matchesToday); the Overdue/Open/In Progress/Blocked/Done
+	// grouping itself always stays relative to the real today.
+	private viewDate: string = toDateKey(new Date());
 
 	constructor(leaf: WorkspaceLeaf, plugin: PlainTasksPlugin) {
 		super(leaf);
@@ -1101,7 +1126,18 @@ class TaskListView extends ItemView {
 	}
 
 	async onOpen() {
+		this.viewDate = toDateKey(new Date());
 		await this.render();
+	}
+
+	private navigateDay(dir: 1 | -1) {
+		this.viewDate = toDateKey(addDays(parseDateKey(this.viewDate), dir));
+		this.render();
+	}
+
+	private goToday() {
+		this.viewDate = toDateKey(new Date());
+		this.render();
 	}
 
 	async onClose() {
@@ -1732,9 +1768,9 @@ class TaskListView extends ItemView {
 	// fixed Overdue/Open/In Progress/Blocked/Done grouping runs. "all" is a
 	// no-op; "today"/"project" narrow the rows shown, they never change how
 	// the surviving rows are grouped.
-	private filterRowsForMode(rows: TaskRow[], todayKey: string): TaskRow[] {
+	private filterRowsForMode(rows: TaskRow[]): TaskRow[] {
 		const mode = this.plugin.settings.viewMode;
-		if (mode === "today") return rows.filter((row) => matchesToday(row, todayKey));
+		if (mode === "today") return rows.filter((row) => matchesToday(row, this.viewDate));
 		if (mode === "project") {
 			const project = this.plugin.settings.viewProject;
 			if (!project) return [];
@@ -1767,9 +1803,26 @@ class TaskListView extends ItemView {
 		this.render();
 	}
 
+	// Day-navigation pill (‹ / today / ›) plus the currently selected day's
+	// title - only rendered while the "today" view mode is active, same
+	// layout as Plain Calendar's toolbar nav group.
+	private renderDayNav(container: HTMLElement) {
+		const nav = container.createDiv({ cls: "plain-tasks-nav" });
+		const navPill = nav.createDiv({ cls: "plain-tasks-pill" });
+		navPill.createEl("button", { text: "‹" }).onclick = () => this.navigateDay(-1);
+		navPill.createEl("button", { text: t("todayButton") }).onclick = () => this.goToday();
+		navPill.createEl("button", { text: "›" }).onclick = () => this.navigateDay(1);
+		nav.createEl("span", { cls: "plain-tasks-nav-title", text: titleForDate(parseDateKey(this.viewDate)) });
+	}
+
 	private renderModeBar(container: HTMLElement, options: ProjectOption[]) {
 		const bar = container.createDiv({ cls: "plain-tasks-mode-bar" });
-		const switcher = bar.createDiv({ cls: "plain-tasks-mode-switch" });
+
+		const left = bar.createDiv({ cls: "plain-tasks-mode-bar-left" });
+		if (this.plugin.settings.viewMode === "today") this.renderDayNav(left);
+
+		const right = bar.createDiv({ cls: "plain-tasks-mode-bar-right" });
+		const switcher = right.createDiv({ cls: "plain-tasks-pill" });
 
 		const modes: { mode: TaskViewMode; label: TranslationKey }[] = [
 			{ mode: "all", label: "viewModeAll" },
@@ -1787,7 +1840,7 @@ class TaskListView extends ItemView {
 		}
 
 		if (this.plugin.settings.viewMode === "project") {
-			const select = bar.createEl("select", { cls: "plain-tasks-project-select" });
+			const select = right.createEl("select", { cls: "plain-tasks-project-select" });
 			select.createEl("option", { text: t("projectFilterPlaceholder"), value: "" });
 
 			const current = this.plugin.settings.viewProject;
@@ -1813,7 +1866,7 @@ class TaskListView extends ItemView {
 		this.seriesIndex = buildSeriesIndex(this.tasks);
 		const todayKey = toDateKey(new Date());
 		const allRows = buildTaskRows(this.tasks, this.seriesIndex, todayKey);
-		const rows = this.filterRowsForMode(allRows, todayKey);
+		const rows = this.filterRowsForMode(allRows);
 
 		const toolbar = container.createDiv({ cls: "plain-tasks-toolbar" });
 		toolbar.createEl("span", { cls: "plain-tasks-title", text: t("taskListViewName") });

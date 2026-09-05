@@ -31,16 +31,46 @@
 .plain-tasks-mode-bar {
 	display: flex;
 	align-items: center;
+	justify-content: space-between;
 	flex-wrap: wrap;
 	gap: var(--size-4-2);
 	margin-bottom: var(--size-4-3);
 }
 
-.plain-tasks-mode-switch {
-	display: inline-flex;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: var(--radius-s);
+.plain-tasks-mode-bar-left,
+.plain-tasks-mode-bar-right {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+}
+
+.plain-tasks-nav {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+}
+
+.plain-tasks-nav-title {
+	font-weight: 600;
+	margin-left: var(--size-4-2);
+}
+
+.plain-tasks-pill {
+	display: flex;
+	align-items: stretch;
+	background-color: var(--background-modifier-border);
+	border-radius: 999px;
+	gap: 1px;
 	overflow: hidden;
+}
+
+.plain-tasks-pill button {
+	cursor: pointer;
+	border: none;
+	border-radius: 0;
+	background-color: var(--background-secondary);
+	color: var(--text-normal);
+	box-shadow: none;
 }
 
 .plain-tasks-mode-btn {
@@ -51,10 +81,6 @@
 	border-radius: 0;
 	padding: var(--size-4-1) var(--size-4-3);
 	box-shadow: none;
-}
-
-.plain-tasks-mode-btn:not(:last-child) {
-	border-right: 1px solid var(--background-modifier-border);
 }
 
 .plain-tasks-mode-btn:hover {

@@ -58,13 +58,13 @@ Open the task list via the ribbon icon or the **Open tasks** command.
 
 ### 🔀 View modes
 
-A segmented control above the list switches between three view modes. In every mode, the fixed Overdue/Open/In Progress/Blocked/Done grouping stays exactly as-is — the mode only decides which rows make it into that grouping in the first place:
+A round pill on the right switches between three view modes. In every mode, the fixed Overdue/Open/In Progress/Blocked/Done grouping stays exactly as-is — the mode only decides which rows make it into that grouping in the first place:
 
 - **All** — every task, the original unfiltered behaviour
-- **Today** — only tasks due today-or-earlier (so overdue tasks stay visible) or scheduled for today; a `done` task only shows up here if it was actually due/scheduled today, not just any overdue-and-done task
+- **Today** — a navigable day, not just the literal calendar date: a day-navigation pill (`‹` / Today / `›`) appears on the left with the selected day's title next to it, mirroring Plain Calendar's toolbar. It shows tasks due on-or-before that day (so overdue tasks stay visible) or scheduled for that day; a `done` task only shows up here if it was actually due/scheduled on that day, not just any overdue-and-done task. The Overdue/Open/In Progress/Blocked/Done grouping itself always stays relative to the real, actual today - only this pre-filter moves with the selected day
 - **Project** — a dropdown next to the switcher lists every distinct project among the currently loaded tasks, resolved to real vault files via Obsidian's own link resolution (so `[[foo]]` and `[[foo|Bar]]` count as the same project) and labelled with the project note's `title` frontmatter, or its filename if that's missing. Values that don't resolve to a file are still listed, marked "(not found)", and matched by exact text. With no project selected (or none existing yet), the list shows a hint instead of an error
 
-The chosen mode and project selection are remembered in the plugin's settings and restored the next time the view opens.
+The chosen mode and project selection are remembered in the plugin's settings and restored the next time the view opens. The selected day in Today mode is not persisted - it resets to the real today each time the view is reopened, same as Plain Calendar's date navigation.
 
 Clicking a task's project chip switches straight into Project mode with that project pre-selected - no need to go through the dropdown.
 

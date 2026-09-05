@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.2
+
+- Changed: the whole view is now responsive to its own pane width (CSS container queries, not viewport media queries - so a narrow sidebar behaves correctly even in a wide window). Below ~480px the view padding and Kanban column width shrink automatically
+- Fixed: long task titles now actually truncate with an ellipsis in both the list and the Kanban board - the title element was missing `flex: 1; min-width: 0`, so the ellipsis rule never had anything to truncate against and titles just overflowed
+- Changed: the Kanban board scroll-snaps one column at a time when scrolling/swiping in a narrow pane or on touch, instead of scrolling freely between column boundaries
+
 ## 1.6.1
 
 - Fixed: a task note with a purely numeric `title` (e.g. `title: 123`, parsed by YAML as a number rather than a string) crashed the entire view render (`localeCompare is not a function` while sorting), leaving every view mode silently blank with no visible way to create a task either. Titles are now always coerced to a string

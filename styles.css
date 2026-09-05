@@ -1,8 +1,29 @@
+/* `container-type: inline-size` makes the container queries below react to
+   this view's own pane width (sidebar vs. main area), not the window width -
+   a plain `@media` query can't see that difference in a split-pane layout. */
 .plain-tasks-view {
+	--plain-tasks-board-col-width: 260px;
+	container-type: inline-size;
+	container-name: plain-tasks;
 	padding: var(--size-4-4);
 	height: 100%;
 	display: flex;
 	flex-direction: column;
+}
+
+@container plain-tasks (max-width: 480px) {
+	.plain-tasks-view {
+		padding: var(--size-4-2);
+		--plain-tasks-board-col-width: 200px;
+	}
+
+	.plain-tasks-board {
+		gap: var(--size-4-2);
+	}
+
+	.plain-tasks-nav-title {
+		font-size: var(--font-ui-small);
+	}
 }
 
 .plain-tasks-mode-bar {
@@ -18,12 +39,14 @@
 .plain-tasks-mode-bar-right {
 	display: flex;
 	align-items: center;
+	flex-wrap: wrap;
 	gap: var(--size-4-2);
 }
 
 .plain-tasks-nav {
 	display: flex;
 	align-items: center;
+	flex-wrap: wrap;
 	gap: var(--size-4-2);
 }
 
@@ -72,6 +95,8 @@
 
 .plain-tasks-project-select {
 	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 100%;
 }
 
 .plain-tasks-body {
@@ -136,14 +161,22 @@
 	display: flex;
 	align-items: center;
 	gap: var(--size-4-1);
+	min-width: 0;
 }
 
 .plain-tasks-recurrence-marker {
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
+	flex-shrink: 0;
 }
 
+/* `flex: 1; min-width: 0` is what actually lets a flex item shrink below its
+   content width - without it, overflow/text-overflow/white-space never had
+   anything to truncate against, so long titles just overflowed the row/card
+   instead of getting an ellipsis. */
 .plain-tasks-item-title {
+	flex: 1;
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -246,10 +279,17 @@
 	overflow-x: auto;
 	padding-bottom: var(--size-4-2);
 	height: 100%;
+	/* Snap one column at a time when scrolling/swiping in a narrow pane or on
+	   a touch screen - "proximity" rather than "mandatory" so a normal drag
+	   over a wide pane (where every column already fits) doesn't fight the
+	   user by snapping unnecessarily. */
+	scroll-snap-type: x proximity;
 }
 
 .plain-tasks-board-column {
-	flex: 0 0 260px;
+	flex: 0 0 var(--plain-tasks-board-col-width);
+	min-width: 0;
+	scroll-snap-align: start;
 	display: flex;
 	flex-direction: column;
 	background-color: var(--background-secondary);

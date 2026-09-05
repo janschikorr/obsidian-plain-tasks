@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.3
+
+- Fixed: the container-query breakpoint from 1.6.2 never actually took effect, because the narrow-width override re-styled `.plain-tasks-view` - the same element that establishes the size container - which browsers restrict. The breakpoint now targets `.plain-tasks-body` and below instead, so the Kanban board's column width, gaps, and padding actually shrink in a narrow pane
+
 ## 1.6.2
 
 - Changed: the whole view is now responsive to its own pane width (CSS container queries, not viewport media queries - so a narrow sidebar behaves correctly even in a wide window). Below ~480px the view padding and Kanban column width shrink automatically

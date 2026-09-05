@@ -1,6 +1,11 @@
 /* `container-type: inline-size` makes the container queries below react to
    this view's own pane width (sidebar vs. main area), not the window width -
-   a plain `@media` query can't see that difference in a split-pane layout. */
+   a plain `@media` query can't see that difference in a split-pane layout.
+   The queries below deliberately never re-style `.plain-tasks-view` itself
+   (the element establishing the container) - a size container has limited
+   ability to restyle its own box based on its own query in some engines, so
+   every override targets a descendant (`.plain-tasks-body` and below)
+   instead, which query cleanly in every Chromium version Obsidian ships. */
 .plain-tasks-view {
 	--plain-tasks-board-col-width: 260px;
 	container-type: inline-size;
@@ -12,13 +17,21 @@
 }
 
 @container plain-tasks (max-width: 480px) {
-	.plain-tasks-view {
-		padding: var(--size-4-2);
+	.plain-tasks-body {
 		--plain-tasks-board-col-width: 200px;
+		gap: var(--size-4-2);
+	}
+
+	.plain-tasks-mode-bar {
+		margin-bottom: var(--size-4-2);
 	}
 
 	.plain-tasks-board {
 		gap: var(--size-4-2);
+	}
+
+	.plain-tasks-board-column {
+		padding: var(--size-4-1);
 	}
 
 	.plain-tasks-nav-title {

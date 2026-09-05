@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.4
+
+- Added: below ~360px of pane width, the Kanban board switches from horizontally-scrolling columns to full-width columns stacked on top of each other (like a mobile Kanban app), since side-by-side columns stop being usable that narrow no matter how much they shrink
+
 ## 1.6.3
 
 - Fixed: the container-query breakpoint from 1.6.2 never actually took effect, because the narrow-width override re-styled `.plain-tasks-view` - the same element that establishes the size container - which browsers restrict. The breakpoint now targets `.plain-tasks-body` and below instead, so the Kanban board's column width, gaps, and padding actually shrink in a narrow pane

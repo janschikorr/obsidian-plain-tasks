@@ -39,6 +39,28 @@
 	}
 }
 
+/* Below this, columns side-by-side (even shrunk) stop being usable - stack
+   them full-width instead, like a mobile Kanban app. The whole board scrolls
+   vertically as one page (`.plain-tasks-body` already has `overflow-y:
+   auto`); each column shows all its cards rather than its own internal
+   scroll area, since there's no more horizontal neighbor to keep in view. */
+@container plain-tasks (max-width: 360px) {
+	.plain-tasks-board {
+		flex-direction: column;
+		scroll-snap-type: none;
+	}
+
+	.plain-tasks-board-column {
+		flex: 0 0 auto;
+		width: 100%;
+		max-height: none;
+	}
+
+	.plain-tasks-board-column-list {
+		overflow-y: visible;
+	}
+}
+
 .plain-tasks-mode-bar {
 	display: flex;
 	align-items: center;

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1
+
+- Fixed: navigating to a day other than today in Today mode now actually changes which tasks are shown. Browsing away from the real today switches to an exact-date view (tasks due or scheduled exactly on that day, recurring series only shown when their pattern lands on that day) instead of silently reusing the same rolling backlog every day. Viewing the real today keeps the original behaviour (overdue-or-due-today, plus anything scheduled today) unchanged
+
 ## 1.4.0
 
 - Changed: Today mode is now a navigable day instead of a hard-coded "today" - a day-navigation pill (`‹` / Today / `›`) with the selected day's title appears on the left of the mode bar whenever Today mode is active, matching Plain Calendar's toolbar. Tasks due on-or-before, or scheduled for, the selected day are shown; the fixed Overdue/Open/In Progress/Blocked/Done grouping stays relative to the real today, only the pre-filter moves with the selected day. The selected day is transient and resets to the real today on reopen, not persisted in settings

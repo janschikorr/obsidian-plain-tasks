@@ -295,6 +295,73 @@ interface TaskRow {
 	master?: Task;
 }
 
+// Whether a recurring master's pattern lands exactly on `dateKey` - used by
+// buildTaskRowsForDay (the navigable day view), as opposed to
+// nextVisibleOccurrence which ignores the calendar date entirely and always
+// resolves to the single earliest still-open occurrence (used by the "all"/
+// "project" views and by the real-today case of the day view, see render()).
+function occurrenceOnDate(master: Task, index: SeriesIndex, dateKey: string): { date: string; exception?: Task } | null {
+	const rule = parseRecurrenceRule(master.recurrence ?? "");
+	if (!rule || !master.due) return null;
+	const start = parseDateKey(master.due);
+	const d = parseDateKey(dateKey);
+	if (dayNumber(d) < dayNumber(start)) return null;
+	if (rule.until && dateKey > rule.until) return null;
+
+	const idx = occurrenceIndex(rule, start, d);
+	if (idx === null) return null;
+	if (rule.count !== undefined && idx >= rule.count) return null;
+	if (master.excludedDates?.includes(dateKey)) return null;
+
+	const exception = index.exceptionsBySeriesDate.get(master.file.path)?.get(dateKey);
+	return { date: dateKey, exception };
+}
+
+// Row set for the navigable day view when browsing away from the real
+// today: unlike buildTaskRows (which always collapses a series to its single
+// next open occurrence, regardless of any date), this only includes a
+// series' occurrence when the pattern actually lands on `dateKey`, and only
+// includes standalone tasks/exceptions that are due or scheduled exactly on
+// that date - so the list genuinely changes as you navigate, instead of
+// showing the same rolling backlog on every day.
+function buildTaskRowsForDay(tasks: Task[], index: SeriesIndex, dateKey: string): TaskRow[] {
+	const rows: TaskRow[] = [];
+	const usedExceptionPaths = new Set<string>();
+
+	for (const master of index.mastersByPath.values()) {
+		const occ = occurrenceOnDate(master, index, dateKey);
+		if (!occ) continue;
+		if (occ.exception) {
+			rows.push({ display: occ.exception, effectiveDue: occ.date, kind: "exception", master });
+			usedExceptionPaths.add(occ.exception.file.path);
+		} else {
+			rows.push({ display: { ...master, due: occ.date }, effectiveDue: occ.date, kind: "master", master });
+		}
+	}
+
+	for (const task of tasks) {
+		if (task.recurrence) continue; // handled via mastersByPath above
+		if (task.seriesPath) {
+			if (usedExceptionPaths.has(task.file.path)) continue;
+			const effectiveDue = task.due ?? task.replacesDate;
+			if (effectiveDue === dateKey) {
+				rows.push({
+					display: task,
+					effectiveDue,
+					kind: "exception",
+					master: index.mastersByPath.get(task.seriesPath),
+				});
+			}
+			continue;
+		}
+		if (task.due === dateKey || task.scheduled === dateKey) {
+			rows.push({ display: task, effectiveDue: task.due, kind: "single" });
+		}
+	}
+
+	return rows;
+}
+
 function buildTaskRows(tasks: Task[], index: SeriesIndex, todayKey: string): TaskRow[] {
 	const rows: TaskRow[] = [];
 	const usedExceptionPaths = new Set<string>();
@@ -1865,8 +1932,15 @@ class TaskListView extends ItemView {
 		this.tasks = this.loadTasks();
 		this.seriesIndex = buildSeriesIndex(this.tasks);
 		const todayKey = toDateKey(new Date());
-		const allRows = buildTaskRows(this.tasks, this.seriesIndex, todayKey);
-		const rows = this.filterRowsForMode(allRows);
+
+		// Browsing to a day other than the real today switches to an exact-date
+		// row set (buildTaskRowsForDay) so the list actually changes as you
+		// navigate; viewing the real today keeps the original rolling
+		// backlog/triage behaviour (buildTaskRows + matchesToday) unchanged.
+		const rows =
+			this.plugin.settings.viewMode === "today" && this.viewDate !== todayKey
+				? buildTaskRowsForDay(this.tasks, this.seriesIndex, this.viewDate)
+				: this.filterRowsForMode(buildTaskRows(this.tasks, this.seriesIndex, todayKey));
 
 		const toolbar = container.createDiv({ cls: "plain-tasks-toolbar" });
 		toolbar.createEl("span", { cls: "plain-tasks-title", text: t("taskListViewName") });

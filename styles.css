@@ -1,0 +1,150 @@
+.plain-tasks-view {
+	padding: var(--size-4-4);
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+}
+
+.plain-tasks-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: var(--size-4-3);
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+}
+
+.plain-tasks-title {
+	font-weight: 600;
+}
+
+.plain-tasks-new-btn {
+	cursor: pointer;
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.plain-tasks-new-btn:hover {
+	background-color: var(--interactive-accent-hover);
+}
+
+.plain-tasks-body {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-4);
+}
+
+.plain-tasks-empty {
+	color: var(--text-muted);
+	padding: var(--size-4-4) 0;
+}
+
+.plain-tasks-group-head {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+	margin-bottom: var(--size-4-2);
+	padding-bottom: var(--size-4-1);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.plain-tasks-group-overdue .plain-tasks-group-head {
+	color: var(--text-error);
+}
+
+.plain-tasks-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.plain-tasks-item {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--size-4-2);
+	padding: var(--size-4-1) var(--size-4-2);
+	border-radius: var(--radius-s);
+	cursor: pointer;
+}
+
+.plain-tasks-item:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.plain-tasks-checkbox {
+	margin-top: 3px;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.plain-tasks-item-main {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.plain-tasks-item-title-row {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-1);
+}
+
+.plain-tasks-recurrence-marker {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.plain-tasks-item-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.plain-tasks-group-done .plain-tasks-item-title {
+	color: var(--text-muted);
+	text-decoration: line-through;
+}
+
+.plain-tasks-item-meta {
+	display: flex;
+	gap: var(--size-4-1);
+	flex-wrap: wrap;
+}
+
+.plain-tasks-chip {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	background-color: var(--background-secondary);
+	border-radius: var(--radius-s);
+	padding: 0 var(--size-4-1);
+}
+
+.plain-tasks-group-overdue .plain-tasks-chip-date {
+	color: var(--text-error);
+	background-color: var(--background-modifier-error);
+}
+
+.plain-tasks-chip-project {
+	color: var(--text-accent);
+}
+
+/* Left border accent per priority, subtle - not a full color swap so the
+   list stays readable in every theme */
+.plain-tasks-priority-high {
+	border-left: 2px solid var(--text-error);
+}
+
+.plain-tasks-priority-normal {
+	border-left: 2px solid transparent;
+}
+
+.plain-tasks-priority-low {
+	border-left: 2px solid var(--text-faint);
+}

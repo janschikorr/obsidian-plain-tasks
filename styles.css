@@ -176,6 +176,31 @@
 
 .plain-tasks-chip-project {
 	color: var(--text-accent);
+	cursor: pointer;
+}
+
+.plain-tasks-chip-project:hover {
+	text-decoration: underline;
+}
+
+/* Project value didn't resolve to a real vault file (typo, deleted note, or
+   genuinely free text) - dimmed instead of the normal accent color, still
+   clickable as an exact-text filter. */
+.plain-tasks-chip-project-unresolved {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.plain-tasks-field-warning {
+	display: none;
+	color: var(--text-warning, var(--text-muted));
+	font-size: var(--font-ui-smaller);
+	margin-top: calc(var(--size-4-1) * -1);
+	margin-bottom: var(--size-4-2);
+}
+
+.plain-tasks-field-warning.is-visible {
+	display: block;
 }
 
 /* Left border accent per priority, subtle - not a full color swap so the

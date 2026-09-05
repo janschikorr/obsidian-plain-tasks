@@ -323,9 +323,9 @@ function buildTaskRows(tasks: Task[], index: SeriesIndex, todayKey: string): Tas
 }
 
 // `project` is a free-text field that may contain a wikilink (e.g.
-// "[[Projects/Foo|Foo Bar]]"). For display in the project filter dropdown we
-// want the readable target text, not the raw markup or the alias - anything
-// that isn't a bare wikilink (plain free text) is shown as-is.
+// "[[Projects/Foo|Foo Bar]]"). For display of a value that failed to resolve
+// to a real file we want the readable target text, not the raw markup or the
+// alias - anything that isn't a bare wikilink (plain free text) is shown as-is.
 function projectDisplayText(raw: string): string {
 	const match = raw.match(/^\[\[(.+)\]\]$/);
 	if (!match) return raw;
@@ -334,14 +334,94 @@ function projectDisplayText(raw: string): string {
 	return pipeIdx >= 0 ? inner.slice(0, pipeIdx) : inner;
 }
 
-// Distinct `project` values across the currently loaded tasks, alphabetically
-// sorted by their readable display text (see projectDisplayText).
-function distinctProjects(tasks: Task[]): string[] {
-	const values = new Set<string>();
+// Frontmatter of a project note as it comes out of the metadata cache - only
+// the fields Plain Tasks actually reads (see rules/templates/project.md in
+// the vault for the full schema, which this plugin doesn't own).
+interface ProjectFrontmatter {
+	title?: string;
+	type?: string;
+}
+
+// Resolves a `project` frontmatter value (a wikilink like "[[ziel]]" or
+// "[[ziel|Alias]]", or plain free text as a fallback) to a real vault file via
+// Obsidian's own link resolution, so two different-looking links to the same
+// note are recognised as the same project. Returns null if nothing resolves
+// (typo, deleted note, or genuinely free-text project name).
+function resolveProjectFile(app: App, raw: string | undefined, sourcePath: string): TFile | null {
+	if (!raw) return null;
+	const match = raw.match(/^\[\[([^\]|]+)(\|[^\]]+)?\]\]$/);
+	const linktext = match ? match[1] : raw;
+	return app.metadataCache.getFirstLinkpathDest(linktext, sourcePath);
+}
+
+// Whether a resolved file is itself a project note (frontmatter `type:
+// project`) - a link can resolve to *some* file without that file being a
+// project (e.g. a stray link to an unrelated note).
+function isProjectFile(app: App, file: TFile): boolean {
+	const fm = app.metadataCache.getFileCache(file)?.frontmatter as ProjectFrontmatter | undefined;
+	return fm?.type === "project";
+}
+
+// Display text for a resolved project file: its frontmatter `title` if set,
+// otherwise the filename without extension.
+function projectDisplayForFile(app: App, file: TFile): string {
+	const fm = app.metadataCache.getFileCache(file)?.frontmatter as ProjectFrontmatter | undefined;
+	return fm?.title ? String(fm.title) : file.basename;
+}
+
+// Every markdown file in the vault whose frontmatter marks it as `type:
+// project` - deliberately not scoped to any hard-coded folder (that folder
+// has already been renamed once), only the frontmatter field decides.
+function getAllProjectFiles(app: App): TFile[] {
+	return app.vault.getMarkdownFiles().filter((file) => isProjectFile(app, file));
+}
+
+// One distinct project among the currently loaded tasks, grouped by the
+// *resolved* file (not the raw string) so "[[foo]]" and "[[foo|Bar]]" count as
+// the same project. `key` is what's stored in settings.viewProject and
+// compared against in filtering: the resolved file's path when resolvable,
+// otherwise the raw project text as a string-equality fallback.
+interface ProjectOption {
+	key: string;
+	file: TFile | null;
+	display: string;
+}
+
+function projectOptionFor(app: App, raw: string, sourcePath: string): ProjectOption {
+	const file = resolveProjectFile(app, raw, sourcePath);
+	if (file) return { key: file.path, file, display: projectDisplayForFile(app, file) };
+	return { key: raw, file: null, display: `${projectDisplayText(raw)} (${t("projectNotFoundSuffix")})` };
+}
+
+// Distinct project options across the currently loaded tasks, alphabetically
+// sorted by their readable display text.
+function distinctProjectOptions(app: App, tasks: Task[]): ProjectOption[] {
+	const byKey = new Map<string, ProjectOption>();
 	for (const task of tasks) {
-		if (task.project) values.add(task.project);
+		if (!task.project) continue;
+		const option = projectOptionFor(app, task.project, task.file.path);
+		if (!byKey.has(option.key)) byKey.set(option.key, option);
 	}
-	return Array.from(values).sort((a, b) => projectDisplayText(a).localeCompare(projectDisplayText(b)));
+	return Array.from(byKey.values()).sort((a, b) => a.display.localeCompare(b.display));
+}
+
+// Builds a ProjectOption for a `key` that isn't among distinctProjectOptions
+// (e.g. the "virtual" project selected via the "show tasks for this note"
+// command, before any task references it yet).
+function projectOptionForKey(app: App, key: string): ProjectOption {
+	const file = app.vault.getAbstractFileByPath(key);
+	if (file instanceof TFile) return { key, file, display: projectDisplayForFile(app, file) };
+	return { key, file: null, display: `${projectDisplayText(key)} (${t("projectNotFoundSuffix")})` };
+}
+
+// Whether `row`'s project matches the selected project filter `key` - via the
+// resolved file when the row's project resolves to one, otherwise via exact
+// string equality as a fallback for genuinely unresolvable/free-text values.
+function rowMatchesProject(app: App, row: TaskRow, key: string): boolean {
+	const raw = row.display.project;
+	if (!raw) return false;
+	const file = resolveProjectFile(app, raw, row.display.file.path);
+	return file ? file.path === key : raw === key;
 }
 
 // Vorfilter for the "today" view mode: due today-or-earlier (so overdue tasks
@@ -477,6 +557,9 @@ const TRANSLATIONS = {
 		viewModeProject: "Projekt",
 		projectFilterPlaceholder: "Projekt wählen…",
 		projectEmptyState: "Wähle ein Projekt aus, um Aufgaben zu sehen.",
+		projectNotFoundSuffix: "nicht gefunden",
+		projectNotFoundWarning: "Projekt nicht gefunden – wird trotzdem gespeichert",
+		showTasksForNote: "Plain Tasks: Aufgaben zu dieser Notiz anzeigen",
 	},
 	en: {
 		groupOverdue: "Overdue",
@@ -556,6 +639,9 @@ const TRANSLATIONS = {
 		viewModeProject: "Project",
 		projectFilterPlaceholder: "Choose a project…",
 		projectEmptyState: "Select a project to see tasks.",
+		projectNotFoundSuffix: "not found",
+		projectNotFoundWarning: "Project not found – will be saved anyway",
+		showTasksForNote: "Plain Tasks: Show tasks for this note",
 	},
 } as const;
 
@@ -679,7 +765,25 @@ function renderRecurrenceDetails(container: HTMLElement, values: TaskFormValues,
 	}
 }
 
-function buildTaskFields(contentEl: HTMLElement, values: TaskFormValues, opts: { showRecurrence?: boolean } = {}) {
+// Populates a native <datalist> with every project note in the vault
+// (frontmatter `type: project`) so the project text field gets browser-native
+// autocomplete without a new dependency. Option value is the wikilink to
+// insert on selection, option text/label is the readable display name.
+function buildProjectDatalist(app: App, contentEl: HTMLElement, datalistId: string) {
+	const datalist = contentEl.createEl("datalist", { attr: { id: datalistId } });
+	for (const file of getAllProjectFiles(app)) {
+		const label = projectDisplayForFile(app, file);
+		datalist.createEl("option", { attr: { value: `[[${file.basename}]]`, label }, text: label });
+	}
+}
+
+function buildTaskFields(
+	app: App,
+	contentEl: HTMLElement,
+	values: TaskFormValues,
+	sourcePath: string,
+	opts: { showRecurrence?: boolean } = {}
+) {
 	new Setting(contentEl).setName(t("titleLabel")).addText((text) => {
 		text.setValue(values.title).setPlaceholder(t("titlePlaceholder")).onChange((v) => (values.title = v));
 		text.inputEl.focus();
@@ -714,11 +818,34 @@ function buildTaskFields(contentEl: HTMLElement, values: TaskFormValues, opts: {
 		text.setValue(values.due).onChange((v) => (values.due = v.trim()));
 	});
 
-	new Setting(contentEl)
-		.setName(t("projectLabel"))
-		.addText((text) =>
-			text.setValue(values.project).setPlaceholder(t("projectPlaceholder")).onChange((v) => (values.project = v.trim()))
-		);
+	const datalistId = `plain-tasks-project-list-${Math.random().toString(36).slice(2)}`;
+	new Setting(contentEl).setName(t("projectLabel")).addText((text) => {
+		text.setValue(values.project).setPlaceholder(t("projectPlaceholder"));
+		text.inputEl.setAttribute("list", datalistId);
+		text.onChange((v) => {
+			values.project = v.trim();
+			updateProjectWarning();
+		});
+		text.inputEl.addEventListener("blur", updateProjectWarning);
+	});
+	buildProjectDatalist(app, contentEl, datalistId);
+
+	const projectWarning = contentEl.createDiv({ cls: "plain-tasks-field-warning" });
+	const updateProjectWarning = () => {
+		projectWarning.empty();
+		if (!values.project) {
+			projectWarning.removeClass("is-visible");
+			return;
+		}
+		const file = resolveProjectFile(app, values.project, sourcePath);
+		if (!file || !isProjectFile(app, file)) {
+			projectWarning.setText(t("projectNotFoundWarning"));
+			projectWarning.addClass("is-visible");
+		} else {
+			projectWarning.removeClass("is-visible");
+		}
+	};
+	updateProjectWarning();
 
 	if (opts.showRecurrence === false) return;
 
@@ -766,7 +893,7 @@ class NewTaskModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		this.setTitle(t("newTask"));
-		buildTaskFields(contentEl, this.values);
+		buildTaskFields(this.app, contentEl, this.values, "");
 
 		new Setting(contentEl)
 			.addButton((btn) => btn.setButtonText(t("cancel")).onClick(() => this.close()))
@@ -794,6 +921,7 @@ class NewTaskModal extends Modal {
 class EditTaskModal extends Modal {
 	private values: TaskFormValues;
 	private allowRecurrence: boolean;
+	private sourcePath: string;
 	private onSave: (values: TaskFormValues) => void;
 	private onOpenNote: () => void;
 	private onDelete: () => void;
@@ -820,6 +948,7 @@ class EditTaskModal extends Modal {
 			recurrenceCount: rule?.count ? String(rule.count) : "",
 		};
 		this.allowRecurrence = allowRecurrence;
+		this.sourcePath = task.file.path;
 		this.onSave = callbacks.onSave;
 		this.onOpenNote = callbacks.onOpenNote;
 		this.onDelete = callbacks.onDelete;
@@ -828,7 +957,7 @@ class EditTaskModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		this.setTitle(t("editTask"));
-		buildTaskFields(contentEl, this.values, { showRecurrence: this.allowRecurrence });
+		buildTaskFields(this.app, contentEl, this.values, this.sourcePath, { showRecurrence: this.allowRecurrence });
 
 		new Setting(contentEl)
 			.addButton((btn) =>
@@ -1471,7 +1600,7 @@ class TaskListView extends ItemView {
 		if (mode === "project") {
 			const project = this.plugin.settings.viewProject;
 			if (!project) return [];
-			return rows.filter((row) => row.display.project === project);
+			return rows.filter((row) => rowMatchesProject(this.app, row, project));
 		}
 		return rows;
 	}
@@ -1490,7 +1619,17 @@ class TaskListView extends ItemView {
 		this.render();
 	}
 
-	private renderModeBar(container: HTMLElement, projects: string[]) {
+	// Switches straight to project mode with `project` pre-selected in one
+	// settings write - used by the project chip and the "show tasks for this
+	// note" command, which shouldn't need a detour through the dropdown.
+	async selectProject(project: string) {
+		this.plugin.settings.viewMode = "project";
+		this.plugin.settings.viewProject = project;
+		await this.plugin.saveSettings();
+		this.render();
+	}
+
+	private renderModeBar(container: HTMLElement, options: ProjectOption[]) {
 		const bar = container.createDiv({ cls: "plain-tasks-mode-bar" });
 		const switcher = bar.createDiv({ cls: "plain-tasks-mode-switch" });
 
@@ -1512,10 +1651,17 @@ class TaskListView extends ItemView {
 		if (this.plugin.settings.viewMode === "project") {
 			const select = bar.createEl("select", { cls: "plain-tasks-project-select" });
 			select.createEl("option", { text: t("projectFilterPlaceholder"), value: "" });
-			for (const project of projects) {
-				select.createEl("option", { text: projectDisplayText(project), value: project });
+
+			const current = this.plugin.settings.viewProject;
+			const allOptions =
+				current && !options.some((o) => o.key === current)
+					? [...options, projectOptionForKey(this.app, current)].sort((a, b) => a.display.localeCompare(b.display))
+					: options;
+
+			for (const option of allOptions) {
+				select.createEl("option", { text: option.display, value: option.key });
 			}
-			select.value = projects.includes(this.plugin.settings.viewProject) ? this.plugin.settings.viewProject : "";
+			select.value = allOptions.some((o) => o.key === current) ? current : "";
 			select.onchange = () => this.setViewProject(select.value);
 		}
 	}
@@ -1536,7 +1682,7 @@ class TaskListView extends ItemView {
 		const newBtn = toolbar.createEl("button", { text: t("newTaskButton"), cls: "plain-tasks-new-btn" });
 		newBtn.onclick = () => this.createTask();
 
-		this.renderModeBar(container, distinctProjects(this.tasks));
+		this.renderModeBar(container, distinctProjectOptions(this.app, this.tasks));
 
 		const body = container.createDiv({ cls: "plain-tasks-body" });
 
@@ -1581,6 +1727,25 @@ class TaskListView extends ItemView {
 		}
 	}
 
+	// The project chip resolves the row's `project` value to a real file (see
+	// resolveProjectFile) to decide its label and click behaviour: clicking it
+	// always switches straight into project mode filtered to this project,
+	// whether or not it resolved - an unresolved value still works as an
+	// exact-text filter, just visually marked as such.
+	private renderProjectChip(meta: HTMLElement, project: string, sourcePath: string) {
+		const file = resolveProjectFile(this.app, project, sourcePath);
+		const key = file ? file.path : project;
+		const display = file ? projectDisplayForFile(this.app, file) : `${projectDisplayText(project)} (${t("projectNotFoundSuffix")})`;
+		const chip = meta.createSpan({
+			cls: "plain-tasks-chip plain-tasks-chip-project" + (file ? "" : " plain-tasks-chip-project-unresolved"),
+			text: display,
+		});
+		chip.onclick = (e) => {
+			e.stopPropagation();
+			this.selectProject(key);
+		};
+	}
+
 	private renderRow(parent: HTMLElement, row: TaskRow) {
 		const item = parent.createDiv({ cls: `plain-tasks-item plain-tasks-priority-${row.display.priority}` });
 
@@ -1598,7 +1763,7 @@ class TaskListView extends ItemView {
 
 		const meta = main.createDiv({ cls: "plain-tasks-item-meta" });
 		if (row.effectiveDue) meta.createSpan({ cls: "plain-tasks-chip plain-tasks-chip-date", text: row.effectiveDue });
-		if (row.display.project) meta.createSpan({ cls: "plain-tasks-chip plain-tasks-chip-project", text: row.display.project });
+		if (row.display.project) this.renderProjectChip(meta, row.display.project, row.display.file.path);
 
 		item.onclick = () => this.editRow(row);
 		item.oncontextmenu = (e) => this.showRowContextMenu(e, row);
@@ -1655,6 +1820,24 @@ export default class PlainTasksPlugin extends Plugin {
 			callback: () => this.activateView(),
 		});
 
+		// Deliberately available for any markdown file, not just `type:
+		// project` notes or a specific folder - a note can be a valid task
+		// filter target even before any task references it yet (see
+		// TaskListView.selectProject / the ProjectOption "virtual entry"
+		// handling in renderModeBar).
+		this.addCommand({
+			id: "show-tasks-for-note",
+			name: t("showTasksForNote"),
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== "md") return false;
+				if (!checking) {
+					this.activateView().then((view) => view.selectProject(file.path));
+				}
+				return true;
+			},
+		});
+
 		this.addSettingTab(new TaskSettingTab(this.app, this));
 	}
 
@@ -1662,7 +1845,7 @@ export default class PlainTasksPlugin extends Plugin {
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_TASKS);
 	}
 
-	async activateView() {
+	async activateView(): Promise<TaskListView> {
 		const { workspace } = this.app;
 		let leaf = workspace.getLeavesOfType(VIEW_TYPE_TASKS)[0];
 		if (!leaf) {
@@ -1670,6 +1853,7 @@ export default class PlainTasksPlugin extends Plugin {
 			await leaf.setViewState({ type: VIEW_TYPE_TASKS, active: true });
 		}
 		workspace.revealLeaf(leaf);
+		return leaf.view as TaskListView;
 	}
 
 	async loadSettings() {

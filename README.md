@@ -14,6 +14,7 @@ Existing task plugins tend to come with their own query language, kanban boards,
 
 - 📋 **One fixed grouping** — Overdue, Open, In Progress, Blocked, Done, always in that order
 - 🔀 **All / Today / Project view modes** — a switcher above the list narrows down which rows are shown before they're grouped; the grouping itself never changes
+- 🔗 **Real project links** — `project` resolves to actual vault files (via Obsidian's link resolution), with autocomplete against notes tagged `type: project` and a not-blocking hint when a value doesn't resolve; click a project chip to jump straight into that project's filtered view
 - 📄 **Tasks are notes** — every task is a regular markdown file with frontmatter, so it's just as searchable, linkable, and versionable as the rest of your vault
 - ☑️ **Checkbox in the list** — check off a task right from the list, no need to open the note
 - 🔁 **Recurring tasks** — daily/weekly/monthly/yearly, anchored on the **due** date, with an optional interval, end date, or occurrence count
@@ -60,9 +61,15 @@ A segmented control above the list switches between three view modes. In every m
 
 - **All** — every task, the original unfiltered behaviour
 - **Today** — only tasks due today-or-earlier (so overdue tasks stay visible) or scheduled for today; a `done` task only shows up here if it was actually due/scheduled today, not just any overdue-and-done task
-- **Project** — a dropdown next to the switcher lists every distinct `project` value among the currently loaded tasks (wikilinks are shown by their readable target text); pick one to see only tasks with that exact `project` value. With no project selected (or none existing yet), the list shows a hint instead of an error
+- **Project** — a dropdown next to the switcher lists every distinct project among the currently loaded tasks, resolved to real vault files via Obsidian's own link resolution (so `[[foo]]` and `[[foo|Bar]]` count as the same project) and labelled with the project note's `title` frontmatter, or its filename if that's missing. Values that don't resolve to a file are still listed, marked "(not found)", and matched by exact text. With no project selected (or none existing yet), the list shows a hint instead of an error
 
 The chosen mode and project selection are remembered in the plugin's settings and restored the next time the view opens.
+
+Clicking a task's project chip switches straight into Project mode with that project pre-selected - no need to go through the dropdown.
+
+### 🔗 Jump from a note to its tasks
+
+Run **Plain Tasks: Show tasks for this note** (command palette) while any markdown note is open: it opens/focuses the task list, switches to Project mode, and selects the active note as the project filter - even if no task points at it yet, in which case you'll see the "no tasks" hint.
 
 ## 📝 Task notes
 
@@ -77,10 +84,14 @@ status: open           # open | in-progress | blocked | done
 priority: normal        # low | normal | high
 scheduled: <YYYY-MM-DD>  # optional
 due: <YYYY-MM-DD>        # optional
-project: <text>          # optional, free text
+project: <text>          # optional, usually a wikilink like [[project-note]], see below
 recurrence: <FREQ=...>   # optional, only valid together with `due`, see below
 ---
 ```
+
+### 🔗 Project field
+
+`project` is stored as a raw wikilink string (e.g. `[[job-applications]]` or `[[job-applications|Bewerbungen]]`), exactly like a normal Obsidian link - it's not migrated or rewritten by the plugin. In the create/edit dialog, the project field offers native autocomplete against every note in the vault with frontmatter `type: project` (folder location doesn't matter); picking a suggestion inserts `[[<filename>]]`. If what you typed doesn't resolve to an existing `type: project` note, a small hint appears under the field - the task is still saved as typed, nothing is blocked.
 
 ### 🔁 Recurring tasks
 
@@ -108,9 +119,9 @@ Under the hood this is stored in `recurrence` as an RRULE-lite string (same synt
 
 ## 🗺️ Roadmap
 
-Known v1 limitations, kept simple on purpose:
+Known limitations, kept simple on purpose:
 
-- `project` is a free-text field shown as a chip, not a real grouping level (no dedicated "group by project" view, only the Project view mode's single-value filter) and has no autocomplete against existing projects yet — typos create a new, separate project value.
+- `project` resolves to real vault files and has autocomplete, but it's still a single-value filter, not a real grouping level (no dedicated "group by project" view).
 - No free-text search, and no filtering beyond the All/Today/Project view modes.
 
 ## 📄 License

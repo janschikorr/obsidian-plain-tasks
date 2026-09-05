@@ -20,6 +20,16 @@ const VIEW_TYPE_TASKS = "plain-tasks-view";
 // unfiltered behaviour; "today" and "project" narrow the row set down.
 type TaskViewMode = "all" | "today" | "project";
 
+// One configurable status: `id` is both the raw frontmatter value stored in
+// `status` AND the label shown as a column head (Kanban) / section head
+// (Today/Project) - deliberately no separate label layer, see
+// decisions/... discussion in the task brief. Exactly one entry is expected
+// to have `done: true`; see doneStatusId for the (crash-safe) lookup.
+interface StatusConfig {
+	id: string;
+	done: boolean;
+}
+
 interface TaskSettings {
 	tasksFolder: string;
 	taskTag: string;
@@ -30,6 +40,11 @@ interface TaskSettings {
 	// project *detection*, which stays frontmatter-based (`type: project`,
 	// no hard-coded folder) - see getAllProjectFiles.
 	projectsFolder: string;
+	// Configured statuses, in display/column order. Identical to the old
+	// hard-coded open/in-progress/blocked/done set by default so existing
+	// task notes keep working unchanged - see statusIdFor/doneStatusId for
+	// how an unknown/removed status value on an existing note is handled.
+	statuses: StatusConfig[];
 }
 
 const DEFAULT_SETTINGS: TaskSettings = {
@@ -38,12 +53,19 @@ const DEFAULT_SETTINGS: TaskSettings = {
 	viewMode: "all",
 	viewProject: "",
 	projectsFolder: "projects",
+	statuses: [
+		{ id: "open", done: false },
+		{ id: "in-progress", done: false },
+		{ id: "blocked", done: false },
+		{ id: "done", done: true },
+	],
 };
 
-type TaskStatus = "open" | "in-progress" | "blocked" | "done";
+// The raw frontmatter `status` value - any string, not a fixed union anymore
+// (see StatusConfig). Use statusIdFor/rowStatusId to resolve it against the
+// currently configured statuses.
+type TaskStatus = string;
 type TaskPriority = "low" | "normal" | "high";
-
-type TaskGroup = "overdue" | "open" | "in-progress" | "blocked" | "done";
 
 interface Task {
 	file: TFile;
@@ -77,12 +99,43 @@ interface TaskFrontmatter {
 	replaces?: string;
 }
 
+// Statuses are now free-form configured strings (see StatusConfig), so a raw
+// frontmatter value is kept as-is (just coerced to a string) - no more
+// canonicalizing to a fixed set of known spellings. Resolving an unknown/
+// removed value against the currently configured statuses happens later, at
+// the point of use (see statusIdFor), not while parsing the note.
 function normalizeStatus(raw?: string): TaskStatus {
-	const v = String(raw ?? "").toLowerCase();
-	if (v === "in-progress" || v === "in_progress" || v === "inprogress") return "in-progress";
-	if (v === "blocked") return "blocked";
-	if (v === "done") return "done";
-	return "open";
+	return raw !== undefined ? String(raw) : "";
+}
+
+// The status id a row should be treated as for grouping/columns/checkbox
+// state: `raw` itself if it matches a configured status, otherwise the
+// first configured status - never throws even if `raw` is empty or refers
+// to a status that was since renamed/deleted in settings. The raw value on
+// the note is left untouched until the next actual status change (see
+// TaskListView.setRowStatus).
+function statusIdFor(raw: string, statuses: StatusConfig[]): string {
+	if (statuses.some((s) => s.id === raw)) return raw;
+	return firstStatusId(statuses);
+}
+
+// Default status for new tasks / the target when reopening a done task -
+// the first configured status. Falls back to "open" only in the
+// pathological case of an empty `statuses` array (shouldn't happen via the
+// settings UI, which always keeps at least one entry).
+function firstStatusId(statuses: StatusConfig[]): string {
+	return statuses.length > 0 ? statuses[0].id : "open";
+}
+
+// The configured "done" status id, if any - undefined if no status is
+// currently marked done (e.g. a corrupted/hand-edited settings file).
+// Callers must treat undefined as "nothing behaves as done", not crash.
+function doneStatusId(statuses: StatusConfig[]): string | undefined {
+	return statuses.find((s) => s.done)?.id;
+}
+
+function rowStatusId(row: TaskRow, statuses: StatusConfig[]): string {
+	return statusIdFor(row.display.status, statuses);
 }
 
 function normalizePriority(raw?: string): TaskPriority {
@@ -111,7 +164,7 @@ function parseTask(file: TFile, fm: TaskFrontmatter, requiredTag: string): Task 
 	return {
 		file,
 		title: fm.title || file.basename,
-		status: normalizeStatus(fm.status),
+		status: normalizeStatus(fm.status), // raw value, resolved against settings.statuses at point of use
 		priority: normalizePriority(fm.priority),
 		scheduled: fm.scheduled ? String(fm.scheduled).slice(0, 10) : undefined,
 		due,
@@ -266,11 +319,17 @@ function buildSeriesIndex(tasks: Task[]): SeriesIndex {
 // edit), the exception's own fields are used for display instead of the
 // master's. Returns null once the rule is exhausted (until/count) without
 // finding any open occurrence.
-function nextVisibleOccurrence(master: Task, index: SeriesIndex, todayKey: string): { date: string; exception?: Task } | null {
+function nextVisibleOccurrence(
+	master: Task,
+	index: SeriesIndex,
+	todayKey: string,
+	statuses: StatusConfig[]
+): { date: string; exception?: Task } | null {
 	const rule = parseRecurrenceRule(master.recurrence ?? "");
 	if (!rule || !master.due) return null;
 	const start = parseDateKey(master.due);
 	const exceptionsByDate = index.exceptionsBySeriesDate.get(master.file.path);
+	const doneId = doneStatusId(statuses);
 
 	for (let idx = 0; idx < MAX_OCCURRENCE_SCAN; idx++) {
 		if (rule.count !== undefined && idx >= rule.count) return null;
@@ -278,7 +337,7 @@ function nextVisibleOccurrence(master: Task, index: SeriesIndex, todayKey: strin
 		if (rule.until && key > rule.until) return null;
 		if (master.excludedDates?.includes(key)) continue;
 		const exception = exceptionsByDate?.get(key);
-		if (exception?.status === "done") continue;
+		if (exception && statusIdFor(exception.status, statuses) === doneId) continue;
 		return { date: key, exception };
 	}
 	return null;
@@ -362,12 +421,12 @@ function buildTaskRowsForDay(tasks: Task[], index: SeriesIndex, dateKey: string)
 	return rows;
 }
 
-function buildTaskRows(tasks: Task[], index: SeriesIndex, todayKey: string): TaskRow[] {
+function buildTaskRows(tasks: Task[], index: SeriesIndex, todayKey: string, statuses: StatusConfig[]): TaskRow[] {
 	const rows: TaskRow[] = [];
 	const usedExceptionPaths = new Set<string>();
 
 	for (const master of index.mastersByPath.values()) {
-		const next = nextVisibleOccurrence(master, index, todayKey);
+		const next = nextVisibleOccurrence(master, index, todayKey, statuses);
 		if (!next) continue;
 		if (next.exception) {
 			rows.push({ display: next.exception, effectiveDue: next.date, kind: "exception", master });
@@ -526,24 +585,30 @@ function rowMatchesProject(app: App, row: TaskRow, key: string): boolean {
 // overdue-and-done), so the today view doesn't silently fill up with old
 // completed occurrences. Uses the row's effective (recurrence-resolved) due
 // date, not the series master's original `due`.
-function matchesToday(row: TaskRow, todayKey: string): boolean {
+function matchesToday(row: TaskRow, todayKey: string, statuses: StatusConfig[]): boolean {
 	const due = row.effectiveDue;
 	const scheduled = row.display.scheduled;
-	if (row.display.status === "done") {
+	if (rowStatusId(row, statuses) === doneStatusId(statuses)) {
 		return due === todayKey || scheduled === todayKey;
 	}
 	return (due !== undefined && due <= todayKey) || scheduled === todayKey;
 }
 
-function groupFor(row: TaskRow, todayKey: string): TaskGroup {
-	if (row.display.status === "done") return "done";
-	if (row.effectiveDue && row.effectiveDue < todayKey) return "overdue";
-	if (row.display.status === "in-progress") return "in-progress";
-	if (row.display.status === "blocked") return "blocked";
-	return "open";
+// Whether `row` should carry the visual "overdue" marker (red accent) - a
+// property of the row itself now, not a separate group/column. Computed
+// against the real, actual today regardless of view mode.
+function isRowOverdue(row: TaskRow, todayKey: string, statuses: StatusConfig[]): boolean {
+	return row.effectiveDue !== undefined && row.effectiveDue < todayKey && rowStatusId(row, statuses) !== doneStatusId(statuses);
 }
 
-const GROUP_ORDER: TaskGroup[] = ["overdue", "open", "in-progress", "blocked", "done"];
+function sortRowsInPlace(rows: TaskRow[]) {
+	rows.sort((a, b) => {
+		const ad = a.effectiveDue ?? "9999-99-99";
+		const bd = b.effectiveDue ?? "9999-99-99";
+		if (ad !== bd) return ad < bd ? -1 : 1;
+		return a.display.title.localeCompare(b.display.title);
+	});
+}
 
 function toDateKey(d: Date): string {
 	const y = d.getFullYear();
@@ -593,20 +658,11 @@ function titleForDate(d: Date): string {
 // they're the vault's data schema, not UI text, see regeln/vorlagen/aufgabe.md.
 const TRANSLATIONS = {
 	de: {
-		groupOverdue: "Überfällig",
-		groupOpen: "Offen",
-		groupInProgress: "In Arbeit",
-		groupBlocked: "Blockiert",
-		groupDone: "Erledigt",
 		newTask: "Neue Aufgabe",
 		editTask: "Aufgabe bearbeiten",
 		titleLabel: "Titel",
 		titlePlaceholder: "Kurzbeschreibung",
 		statusLabel: "Status",
-		statusOpen: "Offen",
-		statusInProgress: "In Arbeit",
-		statusBlocked: "Blockiert",
-		statusDone: "Erledigt",
 		priorityLabel: "Priorität",
 		priorityLow: "Niedrig",
 		priorityNormal: "Normal",
@@ -658,6 +714,16 @@ const TRANSLATIONS = {
 		settingsTagDesc: "Frontmatter-Tag, der eine Notiz als Aufgabe kennzeichnet",
 		settingsProjectsFolderName: "Ordner für automatisch angelegte Projekt-Notizen",
 		settingsProjectsFolderDesc: "Pfad relativ zum Vault, z. B. projects. Betrifft nur neu angelegte Projekt-Notizen, nicht die Erkennung bestehender.",
+		settingsStatusesName: "Status",
+		settingsStatusesDesc:
+			'Spalten im Kanban-Board (Modus „Alle") bzw. Abschnitte in Heute/Projekt, in dieser Reihenfolge. Die ID ist zugleich der in „status" gespeicherte Frontmatter-Wert und die Anzeige - Änderungen wirken sich nicht rückwirkend auf bestehende Aufgaben-Notizen aus.',
+		settingsStatusIdPlaceholder: "Status-ID",
+		settingsStatusDoneTooltip: "Als erledigt markieren (genau ein Status)",
+		settingsStatusMoveUp: "Nach oben verschieben",
+		settingsStatusMoveDown: "Nach unten verschieben",
+		settingsStatusDelete: "Status löschen",
+		settingsAddStatus: "Status hinzufügen",
+		contextMenuChangeStatusLabel: "Status ändern zu",
 		scopeQuestionTitle: "Diese Änderung betrifft…",
 		scopeThisTask: "Nur diese Aufgabe",
 		scopeThisTaskDesc: "Erstellt eine Ausnahme, alle anderen Vorkommen der Serie bleiben unverändert.",
@@ -678,20 +744,11 @@ const TRANSLATIONS = {
 		showTasksForNote: "Plain Tasks: Aufgaben zu dieser Notiz anzeigen",
 	},
 	en: {
-		groupOverdue: "Overdue",
-		groupOpen: "Open",
-		groupInProgress: "In Progress",
-		groupBlocked: "Blocked",
-		groupDone: "Done",
 		newTask: "New task",
 		editTask: "Edit task",
 		titleLabel: "Title",
 		titlePlaceholder: "Short description",
 		statusLabel: "Status",
-		statusOpen: "Open",
-		statusInProgress: "In progress",
-		statusBlocked: "Blocked",
-		statusDone: "Done",
 		priorityLabel: "Priority",
 		priorityLow: "Low",
 		priorityNormal: "Normal",
@@ -743,6 +800,16 @@ const TRANSLATIONS = {
 		settingsTagDesc: "Frontmatter tag that marks a note as a task",
 		settingsProjectsFolderName: "Folder for auto-created project notes",
 		settingsProjectsFolderDesc: "Path relative to the vault, e.g. projects. Only affects newly created project notes, not detection of existing ones.",
+		settingsStatusesName: "Statuses",
+		settingsStatusesDesc:
+			'Columns of the Kanban board ("All" mode) resp. sections in Today/Project, in this order. The ID is both the value stored in frontmatter `status` and the display text - changing it doesn\'t retroactively affect existing task notes.',
+		settingsStatusIdPlaceholder: "Status ID",
+		settingsStatusDoneTooltip: "Mark as done (exactly one status)",
+		settingsStatusMoveUp: "Move up",
+		settingsStatusMoveDown: "Move down",
+		settingsStatusDelete: "Delete status",
+		settingsAddStatus: "Add status",
+		contextMenuChangeStatusLabel: "Change status to",
 		scopeQuestionTitle: "This change applies to…",
 		scopeThisTask: "This task only",
 		scopeThisTaskDesc: "Creates an exception; every other occurrence in the series stays unchanged.",
@@ -901,6 +968,7 @@ function buildTaskFields(
 	contentEl: HTMLElement,
 	values: TaskFormValues,
 	sourcePath: string,
+	statuses: StatusConfig[],
 	opts: { showRecurrence?: boolean } = {}
 ) {
 	new Setting(contentEl).setName(t("titleLabel")).addText((text) => {
@@ -908,14 +976,11 @@ function buildTaskFields(
 		text.inputEl.focus();
 	});
 
+	// The status id is both the stored frontmatter value and the display
+	// text (see StatusConfig) - no separate label lookup here.
 	new Setting(contentEl).setName(t("statusLabel")).addDropdown((dropdown) => {
-		dropdown
-			.addOption("open", t("statusOpen"))
-			.addOption("in-progress", t("statusInProgress"))
-			.addOption("blocked", t("statusBlocked"))
-			.addOption("done", t("statusDone"))
-			.setValue(values.status)
-			.onChange((v) => (values.status = v as TaskStatus));
+		for (const status of statuses) dropdown.addOption(status.id, status.id);
+		dropdown.setValue(values.status).onChange((v) => (values.status = v));
 	});
 
 	new Setting(contentEl).setName(t("priorityLabel")).addDropdown((dropdown) => {
@@ -994,13 +1059,15 @@ function buildTaskFields(
 
 class NewTaskModal extends Modal {
 	private values: TaskFormValues;
+	private statuses: StatusConfig[];
 	private onSubmit: (values: TaskFormValues) => void;
 
-	constructor(app: App, onSubmit: (values: TaskFormValues) => void) {
+	constructor(app: App, statuses: StatusConfig[], onSubmit: (values: TaskFormValues) => void) {
 		super(app);
+		this.statuses = statuses;
 		this.values = {
 			title: "",
-			status: "open",
+			status: firstStatusId(statuses),
 			priority: "normal",
 			scheduled: "",
 			due: "",
@@ -1017,7 +1084,7 @@ class NewTaskModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		this.setTitle(t("newTask"));
-		buildTaskFields(this.app, contentEl, this.values, "");
+		buildTaskFields(this.app, contentEl, this.values, "", this.statuses);
 
 		new Setting(contentEl)
 			.addButton((btn) => btn.setButtonText(t("cancel")).onClick(() => this.close()))
@@ -1046,6 +1113,7 @@ class EditTaskModal extends Modal {
 	private values: TaskFormValues;
 	private allowRecurrence: boolean;
 	private sourcePath: string;
+	private statuses: StatusConfig[];
 	private onSave: (values: TaskFormValues) => void;
 	private onOpenNote: () => void;
 	private onDelete: () => void;
@@ -1053,10 +1121,12 @@ class EditTaskModal extends Modal {
 	constructor(
 		app: App,
 		task: Task,
+		statuses: StatusConfig[],
 		callbacks: { onSave: (values: TaskFormValues) => void; onOpenNote: () => void; onDelete: () => void },
 		allowRecurrence = true
 	) {
 		super(app);
+		this.statuses = statuses;
 		const rule = task.recurrence ? parseRecurrenceRule(task.recurrence) : null;
 		this.values = {
 			title: task.title,
@@ -1081,7 +1151,7 @@ class EditTaskModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		this.setTitle(t("editTask"));
-		buildTaskFields(this.app, contentEl, this.values, this.sourcePath, { showRecurrence: this.allowRecurrence });
+		buildTaskFields(this.app, contentEl, this.values, this.sourcePath, this.statuses, { showRecurrence: this.allowRecurrence });
 
 		new Setting(contentEl)
 			.addButton((btn) =>
@@ -1169,9 +1239,13 @@ class TaskListView extends ItemView {
 	// Which day the "today" view mode is showing - transient (not persisted in
 	// settings), defaults to the real today on every open, same as Plain
 	// Calendar's `anchor`. Only affects the "today" mode's pre-filter (see
-	// filterRowsForMode/matchesToday); the Overdue/Open/In Progress/Blocked/Done
-	// grouping itself always stays relative to the real today.
+	// filterRowsForMode/matchesToday); the grouping-by-configured-status
+	// itself, and the overdue marker, always stay relative to the real today.
 	private viewDate: string = toDateKey(new Date());
+	// Rebuilt on every render() while in "all" (Kanban) mode - maps a row's
+	// drag-and-drop id (`${kind}:${file.path}`) back to its TaskRow so a
+	// column's drop handler can look up which row was dragged.
+	private rowsById: Map<string, TaskRow> = new Map();
 
 	constructor(leaf: WorkspaceLeaf, plugin: PlainTasksPlugin) {
 		super(leaf);
@@ -1390,7 +1464,7 @@ class TaskListView extends ItemView {
 	}
 
 	private createTask() {
-		new NewTaskModal(this.app, async (values) => {
+		new NewTaskModal(this.app, this.plugin.settings.statuses, async (values) => {
 			try {
 				// The task note is created first (without `project`) so a possible
 				// auto-created project note can link back to a task file that
@@ -1429,6 +1503,7 @@ class TaskListView extends ItemView {
 		new EditTaskModal(
 			this.app,
 			task,
+			this.plugin.settings.statuses,
 			{ onSave: opts.onSave, onOpenNote: () => this.openTask(task.file), onDelete: opts.onDelete },
 			opts.allowRecurrence
 		).open();
@@ -1496,17 +1571,25 @@ class TaskListView extends ItemView {
 		}
 	}
 
-	// Checking off a series row never asks the scope question - it always
-	// means "just this occurrence". For an already-materialized exception,
-	// toggle its own status; for a pattern-generated occurrence, create a new
-	// exception note with status: done that overrides just this slot.
-	private async toggleDone(row: TaskRow) {
-		if (!this.isPartOfSeries(row)) {
-			const nextStatus: TaskStatus = row.display.status === "done" ? "open" : "done";
+	// Central status-change method - used by the checkbox, the context menu's
+	// "change status to…" items, and Kanban drag & drop alike.
+	//
+	// - single/exception: the note's own `status` is set directly.
+	// - master (a not-yet-materialized series occurrence), target is the
+	//   "done" status: reuses the same materialize-an-exception logic the
+	//   checkbox always used, so completing a series row from anywhere still
+	//   only ever affects that one occurrence.
+	// - master, target is any other (non-done) status: deliberately simple -
+	//   the master note itself gets the new status (not a new exception),
+	//   which means the whole series' status changes until the next edit.
+	//   No new "status without completion" materialization concept is
+	//   introduced for this - see the task brief.
+	private async setRowStatus(row: TaskRow, statusId: string) {
+		if (!this.isPartOfSeries(row) || row.kind === "exception") {
 			await this.updateFrontmatter(
 				row.display.file,
 				(fm) => {
-					fm.status = nextStatus;
+					fm.status = statusId;
 					fm.dateModified = toDateKey(new Date());
 				},
 				t("errorSaveFailed")
@@ -1514,36 +1597,47 @@ class TaskListView extends ItemView {
 			return;
 		}
 
-		if (row.kind === "exception") {
-			const nextStatus: TaskStatus = row.display.status === "done" ? "open" : "done";
-			await this.updateFrontmatter(
-				row.display.file,
-				(fm) => {
-					fm.status = nextStatus;
-					fm.dateModified = toDateKey(new Date());
-				},
-				t("errorSaveFailed")
-			);
-			return;
-		}
-
-		// kind === "master": materialize a done exception for this occurrence.
+		// kind === "master"
 		const master = row.master!;
-		try {
-			await this.createNote({
-				title: master.title,
-				status: "done",
-				priority: master.priority,
-				project: master.project,
-				due: row.effectiveDue,
-				seriesPath: master.file.path,
-				replacesDate: row.effectiveDue,
-			});
-			this.render();
-		} catch (err) {
-			console.error("Plain Tasks:", err);
-			new Notice(t("errorCreateFailed"));
+		const doneId = doneStatusId(this.plugin.settings.statuses);
+		if (statusId === doneId) {
+			try {
+				await this.createNote({
+					title: master.title,
+					status: statusId,
+					priority: master.priority,
+					project: master.project,
+					due: row.effectiveDue,
+					seriesPath: master.file.path,
+					replacesDate: row.effectiveDue,
+				});
+				this.render();
+			} catch (err) {
+				console.error("Plain Tasks:", err);
+				new Notice(t("errorCreateFailed"));
+			}
+			return;
 		}
+
+		await this.updateFrontmatter(
+			master.file,
+			(fm) => {
+				fm.status = statusId;
+				fm.dateModified = toDateKey(new Date());
+			},
+			t("errorSaveFailed")
+		);
+	}
+
+	// Checking off a row never asks the scope question - it always means
+	// "just this occurrence" for series rows (see setRowStatus). Thin
+	// wrapper: toggles between the configured "done" status and the first
+	// configured status (the same status new tasks default to).
+	private toggleDone(row: TaskRow) {
+		const statuses = this.plugin.settings.statuses;
+		const doneId = doneStatusId(statuses);
+		const isDone = rowStatusId(row, statuses) === doneId;
+		this.setRowStatus(row, isDone ? firstStatusId(statuses) : doneId ?? firstStatusId(statuses));
 	}
 
 	// "Nur diese Aufgabe": for an already-materialized exception, edit its own
@@ -1810,6 +1904,13 @@ class TaskListView extends ItemView {
 		}
 	}
 
+	// "Status ändern zu…" is added as flat items (with a label header) rather
+	// than a real submenu: Menu/MenuItem's public API (see obsidian.d.ts) has
+	// no supported way to nest a submenu - `setSubmenu()` exists at runtime
+	// but is explicitly undocumented/private (the Obsidian team has an open
+	// request to make it public), so using it would mean depending on
+	// unstable internal API. This is a deliberate deviation from the "use
+	// item.setSubmenu()" instruction in the task brief.
 	private showRowContextMenu(e: MouseEvent, row: TaskRow) {
 		e.preventDefault();
 		e.stopPropagation();
@@ -1826,6 +1927,17 @@ class TaskListView extends ItemView {
 				.setIcon("trash")
 				.onClick(() => this.deleteRow(row))
 		);
+		menu.addSeparator();
+		menu.addItem((item) => item.setTitle(t("contextMenuChangeStatusLabel")).setIsLabel(true));
+		const currentId = rowStatusId(row, this.plugin.settings.statuses);
+		for (const status of this.plugin.settings.statuses) {
+			menu.addItem((item) =>
+				item
+					.setTitle(status.id)
+					.setChecked(status.id === currentId)
+					.onClick(() => this.setRowStatus(row, status.id))
+			);
+		}
 		menu.showAtMouseEvent(e);
 	}
 
@@ -1845,12 +1957,12 @@ class TaskListView extends ItemView {
 	}
 
 	// Applies the view mode as a pre-filter on the full row set, before the
-	// fixed Overdue/Open/In Progress/Blocked/Done grouping runs. "all" is a
-	// no-op; "today"/"project" narrow the rows shown, they never change how
-	// the surviving rows are grouped.
+	// configured-status grouping runs. "all" is a no-op; "today"/"project"
+	// narrow the rows shown, they never change how the surviving rows are
+	// grouped.
 	private filterRowsForMode(rows: TaskRow[]): TaskRow[] {
 		const mode = this.plugin.settings.viewMode;
-		if (mode === "today") return rows.filter((row) => matchesToday(row, this.viewDate));
+		if (mode === "today") return rows.filter((row) => matchesToday(row, this.viewDate, this.plugin.settings.statuses));
 		if (mode === "project") {
 			const project = this.plugin.settings.viewProject;
 			if (!project) return [];
@@ -1945,6 +2057,7 @@ class TaskListView extends ItemView {
 		this.tasks = this.loadTasks();
 		this.seriesIndex = buildSeriesIndex(this.tasks);
 		const todayKey = toDateKey(new Date());
+		const statuses = this.plugin.settings.statuses;
 
 		// Browsing to a day other than the real today switches to an exact-date
 		// row set (buildTaskRowsForDay) so the list actually changes as you
@@ -1953,7 +2066,7 @@ class TaskListView extends ItemView {
 		const rows =
 			this.plugin.settings.viewMode === "today" && this.viewDate !== todayKey
 				? buildTaskRowsForDay(this.tasks, this.seriesIndex, this.viewDate)
-				: this.filterRowsForMode(buildTaskRows(this.tasks, this.seriesIndex, todayKey));
+				: this.filterRowsForMode(buildTaskRows(this.tasks, this.seriesIndex, todayKey, statuses));
 
 		this.renderModeBar(container, distinctProjectOptions(this.app, this.tasks));
 
@@ -1970,39 +2083,113 @@ class TaskListView extends ItemView {
 			return;
 		}
 
-		const grouped = new Map<TaskGroup, TaskRow[]>();
-		for (const group of GROUP_ORDER) grouped.set(group, []);
-		for (const row of rows) grouped.get(groupFor(row, todayKey))!.push(row);
-
-		for (const group of grouped.values()) {
-			group.sort((a, b) => {
-				const ad = a.effectiveDue ?? "9999-99-99";
-				const bd = b.effectiveDue ?? "9999-99-99";
-				if (ad !== bd) return ad < bd ? -1 : 1;
-				return a.display.title.localeCompare(b.display.title);
-			});
+		if (this.plugin.settings.viewMode === "all") {
+			this.renderBoard(body, rows, todayKey);
+			return;
 		}
 
-		const groupLabelKey: Record<TaskGroup, TranslationKey> = {
-			overdue: "groupOverdue",
-			open: "groupOpen",
-			"in-progress": "groupInProgress",
-			blocked: "groupBlocked",
-			done: "groupDone",
-		};
+		// Today/Project modes stay a list, sectioned by the configured
+		// statuses (in configured order) instead of the old fixed
+		// Overdue/Open/In Progress/Blocked/Done grouping. "Overdue" is no
+		// longer a group of its own - see isRowOverdue, applied per-row below.
+		const doneId = doneStatusId(statuses);
+		const grouped = new Map<string, TaskRow[]>();
+		for (const status of statuses) grouped.set(status.id, []);
+		for (const row of rows) {
+			const list = grouped.get(rowStatusId(row, statuses));
+			if (list) list.push(row);
+		}
+		for (const list of grouped.values()) sortRowsInPlace(list);
 
-		for (const group of GROUP_ORDER) {
-			const rowsInGroup = grouped.get(group)!;
+		for (const status of statuses) {
+			const rowsInGroup = grouped.get(status.id) ?? [];
 			if (rowsInGroup.length === 0) continue;
 
-			const section = body.createDiv({ cls: `plain-tasks-group plain-tasks-group-${group}` });
-			section.createDiv({ cls: "plain-tasks-group-head", text: `${t(groupLabelKey[group])} (${rowsInGroup.length})` });
+			const section = body.createDiv({
+				cls: "plain-tasks-group" + (status.done ? " plain-tasks-group-done" : ""),
+			});
+			section.createDiv({ cls: "plain-tasks-group-head", text: `${status.id} (${rowsInGroup.length})` });
 
 			const list = section.createDiv({ cls: "plain-tasks-list" });
 			for (const row of rowsInGroup) {
-				this.renderRow(list, row);
+				this.renderRow(list, row, todayKey, doneId);
 			}
 		}
+	}
+
+	// Kanban board for the "all" view mode: one column per configured status,
+	// in configured order. Drag & drop is native HTML5 DnD (no library) - see
+	// renderCard for dragstart, and the column handlers below for
+	// dragover/dragleave/drop.
+	private renderBoard(body: HTMLElement, rows: TaskRow[], todayKey: string) {
+		const statuses = this.plugin.settings.statuses;
+		this.rowsById = new Map();
+
+		const board = body.createDiv({ cls: "plain-tasks-board" });
+		for (const status of statuses) {
+			const column = board.createDiv({
+				cls: "plain-tasks-board-column" + (status.done ? " plain-tasks-board-column-done" : ""),
+			});
+			const rowsInColumn = rows.filter((row) => rowStatusId(row, statuses) === status.id);
+			sortRowsInPlace(rowsInColumn);
+
+			column.createDiv({
+				cls: "plain-tasks-board-column-head",
+				text: `${status.id} (${rowsInColumn.length})`,
+			});
+
+			const list = column.createDiv({ cls: "plain-tasks-board-column-list" });
+			for (const row of rowsInColumn) {
+				this.renderCard(list, row, todayKey);
+			}
+
+			column.ondragover = (e) => {
+				e.preventDefault();
+				column.addClass("is-drag-over");
+			};
+			column.ondragleave = () => column.removeClass("is-drag-over");
+			column.ondrop = (e) => {
+				e.preventDefault();
+				column.removeClass("is-drag-over");
+				const key = e.dataTransfer?.getData("text/plain");
+				if (!key) return;
+				const row = this.rowsById.get(key);
+				if (!row) return;
+				this.setRowStatus(row, status.id);
+			};
+		}
+	}
+
+	private renderCard(parent: HTMLElement, row: TaskRow, todayKey: string) {
+		const key = `${row.kind}:${row.display.file.path}`;
+		this.rowsById.set(key, row);
+		const overdue = isRowOverdue(row, todayKey, this.plugin.settings.statuses);
+
+		const card = parent.createDiv({
+			cls: `plain-tasks-board-card plain-tasks-priority-${row.display.priority}` + (overdue ? " is-overdue" : ""),
+		});
+		card.draggable = true;
+		card.ondragstart = (e) => {
+			e.dataTransfer?.setData("text/plain", key);
+			card.addClass("is-dragging");
+		};
+		card.ondragend = () => card.removeClass("is-dragging");
+
+		const titleRow = card.createDiv({ cls: "plain-tasks-item-title-row" });
+		if (row.kind !== "single") titleRow.createSpan({ cls: "plain-tasks-recurrence-marker", text: "↻" });
+		titleRow.createSpan({ cls: "plain-tasks-item-title", text: row.display.title });
+
+		const meta = card.createDiv({ cls: "plain-tasks-item-meta" });
+		if (row.effectiveDue) {
+			meta.createSpan({
+				cls: "plain-tasks-chip plain-tasks-chip-date" + (overdue ? " is-overdue" : ""),
+				text: row.effectiveDue,
+			});
+		}
+		if (row.display.project) this.renderProjectChip(meta, row.display.project, row.display.file.path);
+
+		card.onclick = () => this.editRow(row);
+		card.oncontextmenu = (e) => this.showRowContextMenu(e, row);
 	}
 
 	// The project chip resolves the row's `project` value to a real file (see
@@ -2024,11 +2211,14 @@ class TaskListView extends ItemView {
 		};
 	}
 
-	private renderRow(parent: HTMLElement, row: TaskRow) {
-		const item = parent.createDiv({ cls: `plain-tasks-item plain-tasks-priority-${row.display.priority}` });
+	private renderRow(parent: HTMLElement, row: TaskRow, todayKey: string, doneId: string | undefined) {
+		const overdue = isRowOverdue(row, todayKey, this.plugin.settings.statuses);
+		const item = parent.createDiv({
+			cls: `plain-tasks-item plain-tasks-priority-${row.display.priority}` + (overdue ? " is-overdue" : ""),
+		});
 
 		const checkbox = item.createEl("input", { type: "checkbox", cls: "plain-tasks-checkbox" });
-		checkbox.checked = row.display.status === "done";
+		checkbox.checked = rowStatusId(row, this.plugin.settings.statuses) === doneId;
 		checkbox.onclick = (e) => {
 			e.stopPropagation();
 			this.toggleDone(row);
@@ -2040,7 +2230,12 @@ class TaskListView extends ItemView {
 		titleRow.createSpan({ cls: "plain-tasks-item-title", text: row.display.title });
 
 		const meta = main.createDiv({ cls: "plain-tasks-item-meta" });
-		if (row.effectiveDue) meta.createSpan({ cls: "plain-tasks-chip plain-tasks-chip-date", text: row.effectiveDue });
+		if (row.effectiveDue) {
+			meta.createSpan({
+				cls: "plain-tasks-chip plain-tasks-chip-date" + (overdue ? " is-overdue" : ""),
+				text: row.effectiveDue,
+			});
+		}
 		if (row.display.project) this.renderProjectChip(meta, row.display.project, row.display.file.path);
 
 		item.onclick = () => this.editRow(row);
@@ -2089,6 +2284,84 @@ class TaskSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				})
 			);
+
+		this.renderStatusesSetting(containerEl);
+	}
+
+	// One row per configured status: an editable id (the stored frontmatter
+	// value and display text at once, see StatusConfig), a "done" toggle
+	// (mutually exclusive - turning one on turns every other off), move up/
+	// down to reorder (determines column/section order), and delete (kept
+	// disabled once only one status is left - at least one must always
+	// exist). Structural changes (add/remove/reorder/done-flag) immediately
+	// save and fully rebuild this tab; typing in the id field only saves,
+	// it doesn't rebuild, so the input never loses focus mid-edit.
+	private renderStatusesSetting(containerEl: HTMLElement): void {
+		new Setting(containerEl).setName(t("settingsStatusesName")).setDesc(t("settingsStatusesDesc")).setHeading();
+
+		const statuses = this.plugin.settings.statuses;
+		statuses.forEach((status, index) => {
+			const setting = new Setting(containerEl);
+			setting.addText((text) => {
+				text.setPlaceholder(t("settingsStatusIdPlaceholder"));
+				text.setValue(status.id).onChange(async (value) => {
+					status.id = value.trim() || status.id;
+					await this.plugin.saveSettings();
+				});
+			});
+			setting.addToggle((toggle) => {
+				toggle.setTooltip(t("settingsStatusDoneTooltip"));
+				toggle.setValue(status.done).onChange(async (value) => {
+					for (const s of statuses) s.done = s === status && value;
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			});
+			setting.addExtraButton((btn) => {
+				btn
+					.setIcon("arrow-up")
+					.setTooltip(t("settingsStatusMoveUp"))
+					.setDisabled(index === 0)
+					.onClick(async () => {
+						if (index === 0) return;
+						statuses.splice(index - 1, 0, statuses.splice(index, 1)[0]);
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+			setting.addExtraButton((btn) => {
+				btn
+					.setIcon("arrow-down")
+					.setTooltip(t("settingsStatusMoveDown"))
+					.setDisabled(index === statuses.length - 1)
+					.onClick(async () => {
+						if (index === statuses.length - 1) return;
+						statuses.splice(index + 1, 0, statuses.splice(index, 1)[0]);
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+			setting.addExtraButton((btn) => {
+				btn
+					.setIcon("trash")
+					.setTooltip(t("settingsStatusDelete"))
+					.setDisabled(statuses.length <= 1)
+					.onClick(async () => {
+						if (statuses.length <= 1) return;
+						statuses.splice(index, 1);
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+		});
+
+		new Setting(containerEl).addButton((btn) =>
+			btn.setButtonText(t("settingsAddStatus")).onClick(async () => {
+				statuses.push({ id: "new-status", done: false });
+				await this.plugin.saveSettings();
+				this.display();
+			})
+		);
 	}
 }
 
@@ -2146,6 +2419,17 @@ export default class PlainTasksPlugin extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		// `statuses` needs its own merge/clone step, same reasoning as the
+		// Object.assign above for the rest of the fields: an older
+		// installation's saved data has no `statuses` key at all (falls back
+		// to the default), and either way the array must be cloned - it must
+		// never be the same array reference as DEFAULT_SETTINGS.statuses,
+		// which the settings UI would otherwise mutate in place.
+		if (!Array.isArray(this.settings.statuses) || this.settings.statuses.length === 0) {
+			this.settings.statuses = DEFAULT_SETTINGS.statuses.map((s) => ({ ...s }));
+		} else {
+			this.settings.statuses = this.settings.statuses.map((s) => ({ id: String(s.id), done: !!s.done }));
+		}
 	}
 
 	async saveSettings() {

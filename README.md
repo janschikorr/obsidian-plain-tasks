@@ -4,15 +4,17 @@
 ![Latest release](https://img.shields.io/github/v/release/janschikorr/obsidian-plain-tasks?sort=semver&label=release)
 ![License](https://img.shields.io/github/license/janschikorr/obsidian-plain-tasks)
 
-A minimal task list for Obsidian. One fixed grouping — Overdue, Open, In Progress, Blocked, Done — for your own task notes. No databases, no boards, no project-management UI to configure.
+A minimal task list for Obsidian, for your own task notes. Statuses are fully configurable, and the "All" view is a Kanban board — one column per status — but there's still no query language, no databases, no project-management UI beyond that.
 
 ## 🤔 Why
 
-Existing task plugins tend to come with their own query language, kanban boards, or a whole project/database layer bolted on. Plain Tasks does one thing: show and manage tasks that live as plain notes in your vault, sister plugin to [Plain Calendar](https://github.com/janschikorr/obsidian-plain-calendar).
+Existing task plugins tend to come with their own query language, or a whole project/database layer bolted on. Plain Tasks does one thing: show and manage tasks that live as plain notes in your vault, sister plugin to [Plain Calendar](https://github.com/janschikorr/obsidian-plain-calendar).
 
 ## ✨ Features
 
-- 📋 **One fixed grouping** — Overdue, Open, In Progress, Blocked, Done, always in that order
+- 📋 **Configurable statuses** — define your own statuses (and which one counts as "done") in settings; they become the Kanban columns in "All" mode and the sections in Today/Project mode, always in the order you configured
+- 🗂️ **Kanban board in "All" mode** — drag a card between columns to change its status, or use "Change status to…" in the right-click menu as a fallback
+- 🔴 **Overdue is a marker, not a group** — a task past its due date gets a red accent on its row/card wherever it currently sits, instead of being pulled into a separate "Overdue" bucket
 - 🔀 **All / Today / Project view modes** — a switcher above the list narrows down which rows are shown before they're grouped; the grouping itself never changes
 - 🔗 **Real project links** — `project` resolves to actual vault files (via Obsidian's link resolution), with autocomplete against notes tagged `type: project`; click a project chip to jump straight into that project's filtered view
 - 🆕 **Projects are auto-created** — if the typed `project` value doesn't resolve to an existing `type: project` note, saving the task always creates one (no confirmation prompt) and links the task to it; a hint under the field previews this before you save
@@ -52,16 +54,27 @@ Updating later means repeating all four steps with the new release's files.
 
 Open the task list via the ribbon icon or the **Open tasks** command.
 
-- ☑️ Click the checkbox → complete (or reopen) a task
-- ✏️ Click a task row → edit it; right-click it → edit/delete
-- ➕ Right-click empty space in the list → create a task (same context-menu approach as Plain Calendar, no dedicated button)
+- ☑️ Click the checkbox → complete (or reopen) a task; toggles between the configured "done" status and the first configured status
+- ✏️ Click a task row/card → edit it; right-click it → edit/delete, plus a "Change status to…" section listing every configured status (a fallback for changing status without dragging)
+- ➕ Right-click empty space in the list/board → create a task (same context-menu approach as Plain Calendar, no dedicated button)
+
+### 🗂️ Statuses and the "All" Kanban board
+
+Statuses are entirely configurable in settings (see below) — there's no fixed set anymore. Whatever you configure becomes:
+
+- The columns of the **All** view's Kanban board, in the order you configured them. Drag a card to another column to change its status; dropping a not-yet-materialized recurring occurrence anywhere except the "done" column changes the whole series' status (see Recurring tasks below), not just that one occurrence.
+- The sections of the **Today** and **Project** views (still plain lists, not boards), in the same order.
+
+Exactly one status is marked "done" in settings; that one drives checkbox behaviour, series completion, and the Today filter's "done tasks only count if actually due/scheduled today" rule. A task whose stored `status` no longer matches any configured status (e.g. after you renamed or deleted one) is simply shown under the first configured status, without touching the note - it only gets rewritten on the next actual status change.
+
+Being overdue (due date in the past, and not the "done" status) is **not** a status or a column of its own — it's a red accent on the row/card itself, wherever it currently sits, computed against the real, actual today regardless of view mode or selected day.
 
 ### 🔀 View modes
 
-A round pill on the right switches between three view modes. In every mode, the fixed Overdue/Open/In Progress/Blocked/Done grouping stays exactly as-is — the mode only decides which rows make it into that grouping in the first place:
+A round pill on the right switches between three view modes. In every mode, the grouping by configured status stays exactly as-is — the mode only decides which rows make it into that grouping in the first place:
 
-- **All** — every task, the original unfiltered behaviour
-- **Today** — a navigable day, not just the literal calendar date: a day-navigation pill (`‹` / Today / `›`) appears on the left with the selected day's title next to it, mirroring Plain Calendar's toolbar. It shows tasks due on-or-before that day (so overdue tasks stay visible) or scheduled for that day; a `done` task only shows up here if it was actually due/scheduled on that day, not just any overdue-and-done task. The Overdue/Open/In Progress/Blocked/Done grouping itself always stays relative to the real, actual today - only this pre-filter moves with the selected day
+- **All** — every task, shown as the Kanban board described above
+- **Today** — a navigable day, not just the literal calendar date: a day-navigation pill (`‹` / Today / `›`) appears on the left with the selected day's title next to it, mirroring Plain Calendar's toolbar. It shows tasks due on-or-before that day (so overdue tasks stay visible) or scheduled for that day; a "done" task only shows up here if it was actually due/scheduled on that day, not just any overdue-and-done task. The status grouping itself always stays relative to the real, actual today - only this pre-filter moves with the selected day
 - **Project** — a dropdown next to the switcher lists every distinct project among the currently loaded tasks, resolved to real vault files via Obsidian's own link resolution (so `[[foo]]` and `[[foo|Bar]]` count as the same project) and labelled with the project note's `title` frontmatter, or its filename if that's missing. Values that don't resolve to a file are still listed, marked "(not found)", and matched by exact text. With no project selected (or none existing yet), the list shows a hint instead of an error
 
 The chosen mode and project selection are remembered in the plugin's settings and restored the next time the view opens. The selected day in Today mode is not persisted - it resets to the real today each time the view is reopened, same as Plain Calendar's date navigation.
@@ -81,7 +94,7 @@ Each task is stored as a note with this frontmatter:
 title: <title>
 tags:
   - task
-status: open           # open | in-progress | blocked | done
+status: open           # any of your configured status IDs (default: open | in-progress | blocked | done), see Settings
 priority: normal        # low | normal | high
 scheduled: <YYYY-MM-DD>  # optional
 due: <YYYY-MM-DD>        # optional
@@ -115,7 +128,8 @@ Under the hood this is stored in `recurrence` as an RRULE-lite string (same synt
 
 `due` is the first occurrence — the note with a `recurrence` field is the series' master note. Unlike Plain Calendar, a recurring task never shows more than one row at a time: the list always collapses a series down to its **next open occurrence** (the earliest one that isn't done yet, which may already be overdue).
 
-- ☑️ **Checking the box** on a series row always completes just that occurrence — a small exception note is created (or, if one already exists for that date, updated) with `status: done`. The series itself keeps going; the row updates to the next occurrence on the next render.
+- ☑️ **Checking the box** (or dragging to the "done" column, or "Change status to…" → the done status) on a series row always completes just that occurrence — a small exception note is created (or, if one already exists for that date, updated) with the configured "done" status. The series itself keeps going; the row updates to the next occurrence on the next render.
+- ➡️ **Dragging (or "Change status to…") a not-yet-materialized series card to any status other than "done"** changes the master note's own status instead - deliberately simple, no per-occurrence materialization for non-done statuses. That means the whole series' status changes until you touch it again.
 - ✏️➡️🗑️ **Editing or deleting** a series row asks what the change applies to, Outlook's classic three-way choice:
   - 1️⃣ **This task only** — creates (or edits) a separate note for just that one occurrence, without touching the rest of the series. Deleting this way adds the date to the master's `excluded` list instead of leaving a stray file.
   - ➡️ **This and all following** — splits the series at that date: the existing master note ends right before it, a new master note continues the same pattern from there on.
@@ -126,6 +140,7 @@ Under the hood this is stored in `recurrence` as an RRULE-lite string (same synt
 - 📁 **Folder for task notes** — where task notes are stored (default: `Tasks`)
 - 🏷️ **Tag for tasks** — the frontmatter tag that marks a note as a task (default: `task`)
 - 📁 **Folder for auto-created project notes** — where new project notes are written when a task's `project` value doesn't resolve to one (default: `projects`); doesn't affect detection of existing project notes, which stays purely frontmatter-based (`type: project`)
+- 🧩 **Statuses** — a reorderable list of status IDs (default: `open`, `in-progress`, `blocked`, `done`). Each entry has a "done" toggle (exactly one can be active), up/down buttons to reorder (this determines column/section order), and a delete button (disabled once only one status is left). Renaming or deleting a status doesn't retroactively touch existing task notes - see "Statuses and the All Kanban board" above for the fallback behaviour on unknown values.
 
 ## 🗺️ Roadmap
 
@@ -133,6 +148,7 @@ Known limitations, kept simple on purpose:
 
 - `project` resolves to real vault files, has autocomplete, and unresolved values are auto-created as new project notes, but it's still a single-value filter, not a real grouping level (no dedicated "group by project" view).
 - No free-text search, and no filtering beyond the All/Today/Project view modes.
+- The right-click "Change status to…" fallback is a flat list of items (with a section label above them), not a nested submenu - Obsidian's public `Menu`/`MenuItem` API has no supported way to nest one (`setSubmenu()` exists but is explicitly undocumented/private).
 
 ## 📄 License
 

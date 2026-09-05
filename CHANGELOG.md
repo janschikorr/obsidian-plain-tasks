@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0
+
+- Added: statuses are now fully configurable in settings - a reorderable list of status IDs, each with a "done" toggle (exactly one is active at a time). The default (`open`, `in-progress`, `blocked`, `done`, with `done` marked as done) matches the old hard-coded set exactly, so existing task notes keep working unchanged without any migration
+- Changed: the "All" view mode is now a Kanban board - one column per configured status, in configured order. Drag a card to another column to change its status, or use the right-click menu's new "Change status to…" section as a fallback (a flat list of items rather than a real submenu - see Roadmap for why)
+- Changed: Today and Project view modes are still plain lists, but their sections are now the configured statuses (in configured order) instead of the old fixed Overdue/Open/In Progress/Blocked/Done grouping
+- Changed: "Overdue" is no longer its own group/column - it's a red accent on the row/card itself (border + red due-date chip), shown regardless of which status section/column the task is actually in, still computed against the real, actual today
+- Changed: checking a task's checkbox now toggles between the configured "done" status and the first configured status, instead of hard-coded `open`/`done`; new tasks default to the first configured status
+- A task whose `status` doesn't match any configured status (e.g. after renaming/deleting one in settings) is shown under the first configured status without touching the note - only an actual status change rewrites it
+- Dragging (or "Change status to…") a not-yet-materialized recurring occurrence to the "done" status completes just that occurrence, same as the checkbox always did; dragging it to any other status changes the whole series' status instead (the master note itself), not just that occurrence - deliberately simple, no new per-occurrence materialization concept for non-done statuses
+
 ## 1.5.0
 
 - Changed: removed the "+ New task" toolbar button and the view title above it - creating a task is now done by right-clicking empty space in the list (a context menu with "New task"), matching Plain Calendar's create-from-context approach. The mode-bar (day nav / view switcher) is now the top row of the view

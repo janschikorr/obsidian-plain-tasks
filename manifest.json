@@ -1,9 +1,9 @@
 {
 	"id": "plain-tasks",
 	"name": "Plain Tasks",
-	"version": "1.5.0",
+	"version": "1.6.0",
 	"minAppVersion": "1.12.0",
-	"description": "A minimal task list (overdue/open/in progress/blocked/done) for your own task notes, with recurrence anchored to the due date - no databases, no projects UI.",
+	"description": "A minimal task list for your own task notes, with configurable statuses, a Kanban board for the \"All\" view, and recurrence anchored to the due date - no databases, no projects UI.",
 	"author": "Jan Schikorr",
 	"authorUrl": "",
 	"isDesktopOnly": false

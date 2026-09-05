@@ -99,10 +99,6 @@
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.plain-tasks-group-overdue .plain-tasks-group-head {
-	color: var(--text-error);
-}
-
 .plain-tasks-list {
 	display: flex;
 	flex-direction: column;
@@ -153,9 +149,14 @@
 	white-space: nowrap;
 }
 
-.plain-tasks-group-done .plain-tasks-item-title {
+.plain-tasks-group-done .plain-tasks-item-title,
+.plain-tasks-board-column-done .plain-tasks-item-title {
 	color: var(--text-muted);
 	text-decoration: line-through;
+}
+
+.plain-tasks-board-column-done {
+	background-color: var(--background-secondary);
 }
 
 .plain-tasks-item-meta {
@@ -172,9 +173,21 @@
 	padding: 0 var(--size-4-1);
 }
 
-.plain-tasks-group-overdue .plain-tasks-chip-date {
+/* Overdue is a per-row/per-card visual marker now, not its own group/column
+   (see isRowOverdue) - applied directly via `.is-overdue` regardless of
+   which status the row is actually grouped/columned under. */
+.plain-tasks-chip-date.is-overdue {
 	color: var(--text-error);
 	background-color: var(--background-modifier-error);
+}
+
+/* box-shadow rather than border-left, so it doesn't collide with the
+   priority accent, which already uses border-left (see
+   .plain-tasks-priority-* at the end of this file) - both can be visible on
+   the same row/card at once. */
+.plain-tasks-item.is-overdue,
+.plain-tasks-board-card.is-overdue {
+	box-shadow: inset 0 0 0 1px var(--text-error);
 }
 
 .plain-tasks-chip-project {
@@ -221,4 +234,69 @@
 
 .plain-tasks-priority-low {
 	border-left: 2px solid var(--text-faint);
+}
+
+/* Kanban board ("All" view mode) - one column per configured status, in
+   configured order. Horizontally scrollable so extra columns don't just get
+   squeezed unreadably narrow. */
+.plain-tasks-board {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--size-4-3);
+	overflow-x: auto;
+	padding-bottom: var(--size-4-2);
+	height: 100%;
+}
+
+.plain-tasks-board-column {
+	flex: 0 0 260px;
+	display: flex;
+	flex-direction: column;
+	background-color: var(--background-secondary);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2);
+	max-height: 100%;
+}
+
+.plain-tasks-board-column-head {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+	margin-bottom: var(--size-4-2);
+	padding-bottom: var(--size-4-1);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.plain-tasks-board-column-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+	overflow-y: auto;
+	min-height: 40px;
+}
+
+/* Drop target feedback while dragging a card over a column. */
+.plain-tasks-board-column.is-drag-over {
+	background-color: var(--background-modifier-hover);
+	box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
+.plain-tasks-board-card {
+	background-color: var(--background-primary);
+	border-radius: var(--radius-s);
+	padding: var(--size-4-2);
+	cursor: grab;
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+}
+
+.plain-tasks-board-card:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.plain-tasks-board-card.is-dragging {
+	opacity: 0.5;
 }

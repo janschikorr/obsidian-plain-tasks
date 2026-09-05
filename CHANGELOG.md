@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0
+
+- Added: if a task's `project` value doesn't resolve to an existing `type: project` note, saving the task (create or edit, any recurrence scope) always creates one automatically - no confirmation prompt - and rewrites `project` to a clean wikilink to it
+  - New note's title comes from the typed value (wikilink alias, else target, else the free text), filename is a kebab-case slug (with a numeric suffix on collision), and frontmatter/body follow the vault's project note template, honestly marked as auto-created and not yet filled in, with a reference back to the task
+  - Values that already resolve to a `type: project` note are left as-is
+  - Added setting: **Folder for auto-created project notes** (default `projects`) - only decides where new notes are written, detection of existing project notes stays frontmatter-based
+- Changed: the project field's hint under the create/edit dialog now previews this ("a new project will be created on save") instead of reading as a save-blocking warning
+
 ## 1.2.0
 
 - Added: `project` values are now resolved to real vault files via Obsidian's link resolution (`[[foo]]` and `[[foo|Bar]]` count as the same project), instead of being compared as raw text

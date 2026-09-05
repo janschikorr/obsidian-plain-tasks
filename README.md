@@ -14,7 +14,8 @@ Existing task plugins tend to come with their own query language, kanban boards,
 
 - 📋 **One fixed grouping** — Overdue, Open, In Progress, Blocked, Done, always in that order
 - 🔀 **All / Today / Project view modes** — a switcher above the list narrows down which rows are shown before they're grouped; the grouping itself never changes
-- 🔗 **Real project links** — `project` resolves to actual vault files (via Obsidian's link resolution), with autocomplete against notes tagged `type: project` and a not-blocking hint when a value doesn't resolve; click a project chip to jump straight into that project's filtered view
+- 🔗 **Real project links** — `project` resolves to actual vault files (via Obsidian's link resolution), with autocomplete against notes tagged `type: project`; click a project chip to jump straight into that project's filtered view
+- 🆕 **Projects are auto-created** — if the typed `project` value doesn't resolve to an existing `type: project` note, saving the task always creates one (no confirmation prompt) and links the task to it; a hint under the field previews this before you save
 - 📄 **Tasks are notes** — every task is a regular markdown file with frontmatter, so it's just as searchable, linkable, and versionable as the rest of your vault
 - ☑️ **Checkbox in the list** — check off a task right from the list, no need to open the note
 - 🔁 **Recurring tasks** — daily/weekly/monthly/yearly, anchored on the **due** date, with an optional interval, end date, or occurrence count
@@ -91,7 +92,15 @@ recurrence: <FREQ=...>   # optional, only valid together with `due`, see below
 
 ### 🔗 Project field
 
-`project` is stored as a raw wikilink string (e.g. `[[job-applications]]` or `[[job-applications|Bewerbungen]]`), exactly like a normal Obsidian link - it's not migrated or rewritten by the plugin. In the create/edit dialog, the project field offers native autocomplete against every note in the vault with frontmatter `type: project` (folder location doesn't matter); picking a suggestion inserts `[[<filename>]]`. If what you typed doesn't resolve to an existing `type: project` note, a small hint appears under the field - the task is still saved as typed, nothing is blocked.
+`project` is stored as a raw wikilink string (e.g. `[[job-applications]]` or `[[job-applications|Bewerbungen]]`), exactly like a normal Obsidian link. In the create/edit dialog, the project field offers native autocomplete against every note in the vault with frontmatter `type: project` (folder location doesn't matter); picking a suggestion inserts `[[<filename>]]`.
+
+If what you typed doesn't resolve to an existing `type: project` note, a hint under the field previews what will happen; on save, Plain Tasks always creates a new project note (no confirmation prompt) and rewrites the task's `project` field to a clean wikilink to it:
+
+- The new note's title is taken from what you typed (the alias of a `[[target|Alias]]` link if given, else the link target, else the free text itself), and its filename is a kebab-case slug of that title (with a numeric suffix on a collision).
+- It's written into the **Folder for auto-created project notes** setting (default `projects`), with frontmatter matching this vault's project template (`id`, `type: project`, `title`, `status: active`, `created`/`updated`, `references: []`) and a body that's honestly marked as auto-created and not yet filled in, referencing the task it came from.
+- If a value you typed already resolves to an existing `type: project` note, nothing is created - it's used as-is, alias included.
+
+This only applies to the create/edit dialog - existing tasks with a free-text `project` value already in the vault aren't touched or migrated retroactively.
 
 ### 🔁 Recurring tasks
 
@@ -116,12 +125,13 @@ Under the hood this is stored in `recurrence` as an RRULE-lite string (same synt
 
 - 📁 **Folder for task notes** — where task notes are stored (default: `Tasks`)
 - 🏷️ **Tag for tasks** — the frontmatter tag that marks a note as a task (default: `task`)
+- 📁 **Folder for auto-created project notes** — where new project notes are written when a task's `project` value doesn't resolve to one (default: `projects`); doesn't affect detection of existing project notes, which stays purely frontmatter-based (`type: project`)
 
 ## 🗺️ Roadmap
 
 Known limitations, kept simple on purpose:
 
-- `project` resolves to real vault files and has autocomplete, but it's still a single-value filter, not a real grouping level (no dedicated "group by project" view).
+- `project` resolves to real vault files, has autocomplete, and unresolved values are auto-created as new project notes, but it's still a single-value filter, not a real grouping level (no dedicated "group by project" view).
 - No free-text search, and no filtering beyond the All/Today/Project view modes.
 
 ## 📄 License

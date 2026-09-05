@@ -25,6 +25,11 @@ interface TaskSettings {
 	taskTag: string;
 	viewMode: TaskViewMode;
 	viewProject: string;
+	// Where auto-created project notes are written (see
+	// TaskListView.resolveOrCreateProject). Deliberately separate from
+	// project *detection*, which stays frontmatter-based (`type: project`,
+	// no hard-coded folder) - see getAllProjectFiles.
+	projectsFolder: string;
 }
 
 const DEFAULT_SETTINGS: TaskSettings = {
@@ -32,6 +37,7 @@ const DEFAULT_SETTINGS: TaskSettings = {
 	taskTag: "task",
 	viewMode: "all",
 	viewProject: "",
+	projectsFolder: "projects",
 };
 
 type TaskStatus = "open" | "in-progress" | "blocked" | "done";
@@ -376,6 +382,29 @@ function getAllProjectFiles(app: App): TFile[] {
 	return app.vault.getMarkdownFiles().filter((file) => isProjectFile(app, file));
 }
 
+// Human-readable title implied by a `project` field's raw text, used both to
+// name an auto-created project note and to preview that name in the
+// create/edit dialog's hint (see TaskListView.resolveOrCreateProject and
+// buildTaskFields). For a wikilink, that's the alias if given, else the
+// target; for anything else (plain free text) it's the text itself.
+function extractProjectTitle(raw: string): string {
+	const match = raw.match(/^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/);
+	if (!match) return raw;
+	return match[2] ?? match[1];
+}
+
+// Kebab-cases a title into a filename-safe slug for an auto-created project
+// note (lowercase, non-alphanumeric runs collapsed to a single "-", trimmed).
+// Falls back to "project" if that leaves nothing usable (e.g. a title made
+// entirely of punctuation/emoji).
+function slugify(title: string): string {
+	const slug = title
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	return slug || "project";
+}
+
 // One distinct project among the currently loaded tasks, grouped by the
 // *resolved* file (not the raw string) so "[[foo]]" and "[[foo|Bar]]" count as
 // the same project. `key` is what's stored in settings.viewProject and
@@ -544,6 +573,8 @@ const TRANSLATIONS = {
 		settingsFolderDesc: "Pfad relativ zum Vault, z. B. Tasks",
 		settingsTagName: "Tag für Aufgaben",
 		settingsTagDesc: "Frontmatter-Tag, der eine Notiz als Aufgabe kennzeichnet",
+		settingsProjectsFolderName: "Ordner für automatisch angelegte Projekt-Notizen",
+		settingsProjectsFolderDesc: "Pfad relativ zum Vault, z. B. projects. Betrifft nur neu angelegte Projekt-Notizen, nicht die Erkennung bestehender.",
 		scopeQuestionTitle: "Diese Änderung betrifft…",
 		scopeThisTask: "Nur diese Aufgabe",
 		scopeThisTaskDesc: "Erstellt eine Ausnahme, alle anderen Vorkommen der Serie bleiben unverändert.",
@@ -558,7 +589,8 @@ const TRANSLATIONS = {
 		projectFilterPlaceholder: "Projekt wählen…",
 		projectEmptyState: "Wähle ein Projekt aus, um Aufgaben zu sehen.",
 		projectNotFoundSuffix: "nicht gefunden",
-		projectNotFoundWarning: "Projekt nicht gefunden – wird trotzdem gespeichert",
+		projectWillCreateHint: 'Neues Projekt „{title}" wird beim Speichern angelegt',
+		projectCreatedNotice: 'Projekt „{title}" angelegt',
 		showTasksForNote: "Plain Tasks: Aufgaben zu dieser Notiz anzeigen",
 	},
 	en: {
@@ -626,6 +658,8 @@ const TRANSLATIONS = {
 		settingsFolderDesc: "Path relative to the vault, e.g. Tasks",
 		settingsTagName: "Tag for tasks",
 		settingsTagDesc: "Frontmatter tag that marks a note as a task",
+		settingsProjectsFolderName: "Folder for auto-created project notes",
+		settingsProjectsFolderDesc: "Path relative to the vault, e.g. projects. Only affects newly created project notes, not detection of existing ones.",
 		scopeQuestionTitle: "This change applies to…",
 		scopeThisTask: "This task only",
 		scopeThisTaskDesc: "Creates an exception; every other occurrence in the series stays unchanged.",
@@ -640,7 +674,8 @@ const TRANSLATIONS = {
 		projectFilterPlaceholder: "Choose a project…",
 		projectEmptyState: "Select a project to see tasks.",
 		projectNotFoundSuffix: "not found",
-		projectNotFoundWarning: "Project not found – will be saved anyway",
+		projectWillCreateHint: 'A new project "{title}" will be created on save',
+		projectCreatedNotice: 'Project "{title}" created',
 		showTasksForNote: "Plain Tasks: Show tasks for this note",
 	},
 } as const;
@@ -830,6 +865,10 @@ function buildTaskFields(
 	});
 	buildProjectDatalist(app, contentEl, datalistId);
 
+	// Info hint, not an error: an unresolved value is never rejected, it just
+	// means resolveOrCreateProject will create a matching project note on
+	// save (see TaskListView.resolveOrCreateProject) instead of leaving free
+	// text in place.
 	const projectWarning = contentEl.createDiv({ cls: "plain-tasks-field-warning" });
 	const updateProjectWarning = () => {
 		projectWarning.empty();
@@ -839,7 +878,8 @@ function buildTaskFields(
 		}
 		const file = resolveProjectFile(app, values.project, sourcePath);
 		if (!file || !isProjectFile(app, file)) {
-			projectWarning.setText(t("projectNotFoundWarning"));
+			const title = extractProjectTitle(values.project);
+			projectWarning.setText(t("projectWillCreateHint").replace("{title}", title));
 			projectWarning.addClass("is-visible");
 		} else {
 			projectWarning.removeClass("is-visible");
@@ -1170,6 +1210,72 @@ class TaskListView extends ItemView {
 		return file;
 	}
 
+	// Resolves a task's `project` field to a real project note, auto-creating
+	// one when needed - Plain Tasks never leaves `project` as unresolved free
+	// text once a task is saved through the dialog. `taskRef` identifies the
+	// task the new note should point back to: `basename` (no extension) for a
+	// real wikilink in the note body, `title` for the human-readable mentions.
+	//
+	// - Empty/undefined `raw` -> undefined (no project set, nothing created).
+	// - `raw` already resolves to a `type: project` file -> `raw` unchanged
+	//   (existing project, including its alias if any - nothing to do).
+	// - Otherwise (nothing resolved, or resolved to a non-project file) -> a
+	//   new project note is created under `projectsFolder` and its wikilink is
+	//   returned instead.
+	//
+	// On failure to create the note, the error is logged and surfaced via
+	// Notice, and the original `raw` text is returned unchanged so saving the
+	// task itself never fails because of this.
+	private async resolveOrCreateProject(raw: string, taskRef: { basename: string; title: string }): Promise<string | undefined> {
+		if (!raw) return undefined;
+
+		const existing = resolveProjectFile(this.app, raw, "");
+		if (existing && isProjectFile(this.app, existing)) return raw;
+
+		const title = extractProjectTitle(raw);
+		const baseSlug = slugify(title);
+		const folderPath = normalizePath(this.plugin.settings.projectsFolder);
+
+		try {
+			await this.ensureFolder(folderPath);
+
+			let slug = baseSlug;
+			let suffix = 2;
+			while (this.app.vault.getAbstractFileByPath(normalizePath(`${folderPath}/${slug}.md`))) {
+				slug = `${baseSlug}-${suffix}`;
+				suffix++;
+			}
+
+			const today = toDateKey(new Date());
+			const content =
+				`---\n` +
+				`id: project-${slug}\n` +
+				`type: project\n` +
+				`title: ${title}\n` +
+				`status: active\n` +
+				`created: ${today}\n` +
+				`updated: ${today}\n` +
+				`references: []\n` +
+				`---\n\n` +
+				`## Current State\n` +
+				`Automatically created by Plain Tasks from a task reference. Not yet filled in.\n\n` +
+				`## Missing Context\n` +
+				`Goal, current state, and next steps have not been captured yet.\n\n` +
+				`## Sources / References\n` +
+				`- Task: [[${taskRef.basename}]] (auto-created by plain-tasks)\n\n` +
+				`## Timeline\n` +
+				`- ${today}: File automatically created by plain-tasks, referenced from task "${taskRef.title}" (source: plain-tasks)\n`;
+
+			await this.app.vault.create(normalizePath(`${folderPath}/${slug}.md`), content);
+			new Notice(t("projectCreatedNotice").replace("{title}", title));
+			return `[[${slug}]]`;
+		} catch (err) {
+			console.error("Plain Tasks:", err);
+			new Notice(t("errorCreateFailed"));
+			return raw;
+		}
+	}
+
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	private async updateFrontmatter(file: TFile, mutate: (fm: any) => void, errorMsg: string) {
 		try {
@@ -1185,15 +1291,24 @@ class TaskListView extends ItemView {
 	private createTask() {
 		new NewTaskModal(this.app, async (values) => {
 			try {
-				await this.createNote({
+				// The task note is created first (without `project`) so a possible
+				// auto-created project note can link back to a task file that
+				// actually exists yet - see resolveOrCreateProject.
+				const file = await this.createNote({
 					title: values.title,
 					status: values.status,
 					priority: values.priority,
 					scheduled: values.scheduled || undefined,
 					due: values.due || undefined,
-					project: values.project || undefined,
 					recurrence: combineRecurrence(values) || undefined,
 				});
+				const project = await this.resolveOrCreateProject(values.project, { basename: file.basename, title: values.title });
+				if (project) {
+					await this.app.fileManager.processFrontMatter(file, (fm) => {
+						fm.project = project;
+					});
+					await this.waitForMetadata(file);
+				}
 				this.render();
 			} catch (err) {
 				console.error("Plain Tasks:", err);
@@ -1249,8 +1364,9 @@ class TaskListView extends ItemView {
 	private editSingleTask(task: Task) {
 		this.openEditModalFor(task, {
 			allowRecurrence: true,
-			onSave: (values) =>
-				this.updateFrontmatter(
+			onSave: async (values) => {
+				const project = await this.resolveOrCreateProject(values.project, { basename: task.file.basename, title: values.title });
+				await this.updateFrontmatter(
 					task.file,
 					(fm) => {
 						fm.title = values.title;
@@ -1258,12 +1374,13 @@ class TaskListView extends ItemView {
 						fm.priority = values.priority;
 						fm.scheduled = values.scheduled || undefined;
 						fm.due = values.due || undefined;
-						fm.project = values.project || undefined;
+						fm.project = project;
 						fm.recurrence = combineRecurrence(values) || undefined;
 						fm.dateModified = toDateKey(new Date());
 					},
 					t("errorSaveFailed")
-				),
+				);
+			},
 			onDelete: () => this.deleteSingleTask(task),
 		});
 	}
@@ -1335,8 +1452,12 @@ class TaskListView extends ItemView {
 		if (row.kind === "exception") {
 			this.openEditModalFor(row.display, {
 				allowRecurrence: false,
-				onSave: (values) =>
-					this.updateFrontmatter(
+				onSave: async (values) => {
+					const project = await this.resolveOrCreateProject(values.project, {
+						basename: row.display.file.basename,
+						title: values.title,
+					});
+					await this.updateFrontmatter(
 						row.display.file,
 						(fm) => {
 							fm.title = values.title;
@@ -1344,11 +1465,12 @@ class TaskListView extends ItemView {
 							fm.priority = values.priority;
 							fm.scheduled = values.scheduled || undefined;
 							fm.due = values.due || undefined;
-							fm.project = values.project || undefined;
+							fm.project = project;
 							fm.dateModified = toDateKey(new Date());
 						},
 						t("errorSaveFailed")
-					),
+					);
+				},
 				onDelete: () => this.deleteThisOccurrence(row),
 			});
 			return;
@@ -1360,16 +1482,25 @@ class TaskListView extends ItemView {
 			allowRecurrence: false,
 			onSave: async (values) => {
 				try {
-					await this.createNote({
+					// See createTask: the exception note is created first (without
+					// `project`) so an auto-created project note can link back to a
+					// task file that actually exists.
+					const file = await this.createNote({
 						title: values.title,
 						status: values.status,
 						priority: values.priority,
 						scheduled: values.scheduled || undefined,
 						due: values.due || undefined,
-						project: values.project || undefined,
 						seriesPath: master.file.path,
 						replacesDate: row.effectiveDue,
 					});
+					const project = await this.resolveOrCreateProject(values.project, { basename: file.basename, title: values.title });
+					if (project) {
+						await this.app.fileManager.processFrontMatter(file, (fm) => {
+							fm.project = project;
+						});
+						await this.waitForMetadata(file);
+					}
 					this.render();
 				} catch (err) {
 					console.error("Plain Tasks:", err);
@@ -1415,8 +1546,9 @@ class TaskListView extends ItemView {
 		if (!master) return;
 		this.openEditModalFor(master, {
 			allowRecurrence: true,
-			onSave: (values) =>
-				this.updateFrontmatter(
+			onSave: async (values) => {
+				const project = await this.resolveOrCreateProject(values.project, { basename: master.file.basename, title: values.title });
+				await this.updateFrontmatter(
 					master.file,
 					(fm) => {
 						fm.title = values.title;
@@ -1424,12 +1556,13 @@ class TaskListView extends ItemView {
 						fm.priority = values.priority;
 						fm.scheduled = values.scheduled || undefined;
 						fm.due = values.due || undefined;
-						fm.project = values.project || undefined;
+						fm.project = project;
 						fm.recurrence = combineRecurrence(values) || undefined;
 						fm.dateModified = toDateKey(new Date());
 					},
 					t("errorSaveFailed")
-				),
+				);
+			},
 			onDelete: () => this.deleteSeries(row),
 		});
 	}
@@ -1515,8 +1648,12 @@ class TaskListView extends ItemView {
 			this.render();
 			this.openEditModalFor(newMaster, {
 				allowRecurrence: true,
-				onSave: (values) =>
-					this.updateFrontmatter(
+				onSave: async (values) => {
+					const project = await this.resolveOrCreateProject(values.project, {
+						basename: newMaster.file.basename,
+						title: values.title,
+					});
+					await this.updateFrontmatter(
 						newMaster.file,
 						(fm) => {
 							fm.title = values.title;
@@ -1524,12 +1661,13 @@ class TaskListView extends ItemView {
 							fm.priority = values.priority;
 							fm.scheduled = values.scheduled || undefined;
 							fm.due = values.due || undefined;
-							fm.project = values.project || undefined;
+							fm.project = project;
 							fm.recurrence = combineRecurrence(values) || undefined;
 							fm.dateModified = toDateKey(new Date());
 						},
 						t("errorSaveFailed")
-					),
+					);
+				},
 				onDelete: () =>
 					this.deleteSeries({ display: newMaster, effectiveDue: newMaster.due, kind: "master", master: newMaster }),
 			});
@@ -1798,6 +1936,16 @@ class TaskSettingTab extends PluginSettingTab {
 			.addText((text) =>
 				text.setValue(this.plugin.settings.taskTag).onChange(async (value) => {
 					this.plugin.settings.taskTag = value.trim() || DEFAULT_SETTINGS.taskTag;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName(t("settingsProjectsFolderName"))
+			.setDesc(t("settingsProjectsFolderDesc"))
+			.addText((text) =>
+				text.setValue(this.plugin.settings.projectsFolder).onChange(async (value) => {
+					this.plugin.settings.projectsFolder = value.trim() || DEFAULT_SETTINGS.projectsFolder;
 					await this.plugin.saveSettings();
 				})
 			);

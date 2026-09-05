@@ -191,9 +191,12 @@
 	font-style: italic;
 }
 
+/* Not an error - currently only used for the project field's "will be
+   created on save" hint, so a neutral muted tone rather than a warning
+   color (nothing here is actually blocking or wrong). */
 .plain-tasks-field-warning {
 	display: none;
-	color: var(--text-warning, var(--text-muted));
+	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	margin-top: calc(var(--size-4-1) * -1);
 	margin-bottom: var(--size-4-2);

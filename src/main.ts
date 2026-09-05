@@ -826,7 +826,7 @@ function buildTaskFields(
 			values.project = v.trim();
 			updateProjectWarning();
 		});
-		text.inputEl.addEventListener("blur", updateProjectWarning);
+		text.inputEl.addEventListener("blur", () => updateProjectWarning());
 	});
 	buildProjectDatalist(app, contentEl, datalistId);
 

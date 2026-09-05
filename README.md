@@ -54,7 +54,7 @@ Open the task list via the ribbon icon or the **Open tasks** command.
 
 - ☑️ Click the checkbox → complete (or reopen) a task
 - ✏️ Click a task row → edit it; right-click it → edit/delete
-- ➕ **New task** button in the toolbar → create a task
+- ➕ Right-click empty space in the list → create a task (same context-menu approach as Plain Calendar, no dedicated button)
 
 ### 🔀 View modes
 

@@ -640,7 +640,6 @@ const TRANSLATIONS = {
 		delete: "Löschen",
 		openNote: "Notiz öffnen",
 		edit: "Bearbeiten",
-		newTaskButton: "+ Neue Aufgabe",
 		errorTitleMissing: "Titel fehlt",
 		errorScheduledFormat: "Geplant für muss im Format YYYY-MM-DD sein",
 		errorDueFormat: "Fällig am muss im Format YYYY-MM-DD sein",
@@ -726,7 +725,6 @@ const TRANSLATIONS = {
 		delete: "Delete",
 		openNote: "Open note",
 		edit: "Edit",
-		newTaskButton: "+ New task",
 		errorTitleMissing: "Title is missing",
 		errorScheduledFormat: "Scheduled must be in YYYY-MM-DD format",
 		errorDueFormat: "Due must be in YYYY-MM-DD format",
@@ -1831,6 +1829,21 @@ class TaskListView extends ItemView {
 		menu.showAtMouseEvent(e);
 	}
 
+	// Right-click on empty list space (not a row - rows stop propagation in
+	// showRowContextMenu) opens this instead of a dedicated "+ New task"
+	// button, matching Plain Calendar's create-from-context approach.
+	private showCreateContextMenu(e: MouseEvent) {
+		e.preventDefault();
+		const menu = new Menu();
+		menu.addItem((item) =>
+			item
+				.setTitle(t("newTask"))
+				.setIcon("plus")
+				.onClick(() => this.createTask())
+		);
+		menu.showAtMouseEvent(e);
+	}
+
 	// Applies the view mode as a pre-filter on the full row set, before the
 	// fixed Overdue/Open/In Progress/Blocked/Done grouping runs. "all" is a
 	// no-op; "today"/"project" narrow the rows shown, they never change how
@@ -1942,14 +1955,14 @@ class TaskListView extends ItemView {
 				? buildTaskRowsForDay(this.tasks, this.seriesIndex, this.viewDate)
 				: this.filterRowsForMode(buildTaskRows(this.tasks, this.seriesIndex, todayKey));
 
-		const toolbar = container.createDiv({ cls: "plain-tasks-toolbar" });
-		toolbar.createEl("span", { cls: "plain-tasks-title", text: t("taskListViewName") });
-		const newBtn = toolbar.createEl("button", { text: t("newTaskButton"), cls: "plain-tasks-new-btn" });
-		newBtn.onclick = () => this.createTask();
-
 		this.renderModeBar(container, distinctProjectOptions(this.app, this.tasks));
 
 		const body = container.createDiv({ cls: "plain-tasks-body" });
+		// New tasks are created via right-click (see showCreateContextMenu) -
+		// there's no dedicated button, matching Plain Calendar's own
+		// create-from-context approach. Wired before the empty-state return so
+		// it works even when the list has no rows yet.
+		body.oncontextmenu = (e) => this.showCreateContextMenu(e);
 
 		if (rows.length === 0) {
 			const emptyText = this.plugin.settings.viewMode === "project" ? t("projectEmptyState") : t("emptyState");

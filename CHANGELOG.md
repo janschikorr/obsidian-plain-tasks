@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0
+
+- Changed: removed the "+ New task" toolbar button and the view title above it - creating a task is now done by right-clicking empty space in the list (a context menu with "New task"), matching Plain Calendar's create-from-context approach. The mode-bar (day nav / view switcher) is now the top row of the view
+
 ## 1.4.1
 
 - Fixed: navigating to a day other than today in Today mode now actually changes which tasks are shown. Browsing away from the real today switches to an exact-date view (tasks due or scheduled exactly on that day, recurring series only shown when their pattern lands on that day) instead of silently reusing the same rolling backlog every day. Viewing the real today keeps the original behaviour (overdue-or-due-today, plus anything scheduled today) unchanged

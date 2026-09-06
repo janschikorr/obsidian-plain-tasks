@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.0
+
+- Added: "Routinen" (Routines) view mode - lists recurring tasks (series and their generated occurrences) using the same status-sectioned list as Today/Project, not the Kanban board
+- Added: "Show recurring tasks" setting (on by default) to hide recurring rows from All/Today/Project; Routinen always shows them regardless
+- Added: a quick toolbar toggle (↻) for that setting, so it can be flipped without opening plugin settings - stays in sync with the settings-tab toggle either way
+- Changed: in Project mode, the project-select dropdown moved from the right side of the toolbar to the left
+
 ## 1.8.1
 
 - Removed Obsidian's native per-pane header (back/forward history arrows, the view title, and the "..." more-options menu) from the task list view - it added no value on a static, non-navigable view

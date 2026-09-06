@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.1
+
+- Removed Obsidian's native per-pane header (back/forward history arrows, the view title, and the "..." more-options menu) from the task list view - it added no value on a static, non-navigable view
+
 ## 1.8.0
 
 - Added: "Show tasks in calendar" setting (off by default). When on and Plain Calendar is installed, every task with a `due` date shows up there as a read-only entry - Plain Calendar reads this setting directly, no action needed here beyond turning it on

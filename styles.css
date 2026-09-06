@@ -128,6 +128,33 @@
 	color: var(--text-on-accent);
 }
 
+/* Quick on-page toggle for the showRecurringTasks setting, next to the mode
+   switcher - see TaskListView.toggleShowRecurringTasks. Same active/inactive
+   visual language as .plain-tasks-mode-btn.is-active, but a standalone
+   rounded button rather than a pill segment, since it isn't part of a
+   mutually-exclusive group. */
+.plain-tasks-icon-toggle {
+	cursor: pointer;
+	background-color: var(--background-secondary);
+	color: var(--text-muted);
+	border: none;
+	border-radius: var(--radius-s);
+	padding: var(--size-4-1) var(--size-4-2);
+	box-shadow: none;
+	font-size: var(--font-ui-medium);
+	line-height: 1;
+}
+
+.plain-tasks-icon-toggle:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.plain-tasks-icon-toggle.is-active {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
 .plain-tasks-project-select {
 	flex: 0 1 auto;
 	min-width: 0;

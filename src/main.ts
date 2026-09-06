@@ -18,7 +18,10 @@ const VIEW_TYPE_TASKS = "plain-tasks-view";
 // Which subset of rows the list view shows before applying the fixed
 // Overdue/Open/In Progress/Blocked/Done grouping. "all" is the original,
 // unfiltered behaviour; "today" and "project" narrow the row set down.
-type TaskViewMode = "all" | "today" | "project";
+// "routines" narrows it to recurring tasks only (see isRecurringRow) -
+// always shown there regardless of showRecurringTasks, since that's the
+// view's whole purpose.
+type TaskViewMode = "all" | "today" | "project" | "routines";
 
 // One configurable status: `id` is both the raw frontmatter value stored in
 // `status` AND the label shown as a column head (Kanban) / section head
@@ -51,6 +54,12 @@ interface TaskSettings {
 	// view. Plain Calendar reads this directly via
 	// `app.plugins.plugins["plain-tasks"].settings`, see its README.
 	showInCalendar: boolean;
+	// Whether recurring tasks (see isRecurringRow) appear in the "all"/
+	// "today"/"project" views. On by default (matches the plugin's original,
+	// unfiltered behaviour) - this is purely a visibility toggle for those
+	// three views, it never affects the "routines" view, which always shows
+	// them regardless of this setting.
+	showRecurringTasks: boolean;
 }
 
 const DEFAULT_SETTINGS: TaskSettings = {
@@ -66,6 +75,7 @@ const DEFAULT_SETTINGS: TaskSettings = {
 		{ id: "done", done: true },
 	],
 	showInCalendar: false,
+	showRecurringTasks: true,
 };
 
 // The raw frontmatter `status` value - any string, not a fixed union anymore
@@ -611,6 +621,16 @@ function isRowOverdue(row: TaskRow, todayKey: string, statuses: StatusConfig[]):
 	return row.effectiveDue !== undefined && row.effectiveDue < todayKey && rowStatusId(row, statuses) !== doneStatusId(statuses);
 }
 
+// Whether `row` belongs to a recurring series (a materialized exception or a
+// pattern-generated occurrence) as opposed to a genuinely standalone task -
+// used both by the "routines" view mode (which shows only these) and by the
+// showRecurringTasks setting (which hides them elsewhere). Same underlying
+// check as TaskListView.isPartOfSeries, kept as a free function here since
+// filterRowsForMode needs it outside the view mode's own row-mutation logic.
+function isRecurringRow(row: TaskRow): boolean {
+	return row.kind !== "single";
+}
+
 function sortRowsInPlace(rows: TaskRow[]) {
 	rows.sort((a, b) => {
 		const ad = a.effectiveDue ?? "9999-99-99";
@@ -737,6 +757,10 @@ const TRANSLATIONS = {
 		settingsShowInCalendarName: "Aufgaben im Kalender anzeigen",
 		settingsShowInCalendarDesc:
 			"Zeigt Aufgaben mit einem Fälligkeitsdatum (due) als schreibgeschützte Einträge in Plain Calendar an, falls installiert.",
+		settingsShowRecurringTasksName: "Wiederkehrende Aufgaben in Alle/Heute/Projekt anzeigen",
+		settingsShowRecurringTasksDesc:
+			'Betrifft nur die Ansichten „Alle", „Heute" und „Projekt". Der Modus „Routinen" zeigt wiederkehrende Aufgaben unabhängig von dieser Einstellung immer an.',
+		toggleRecurringTasksLabel: "Wiederkehrende Aufgaben anzeigen/ausblenden",
 		contextMenuChangeStatusLabel: "Status ändern zu",
 		scopeQuestionTitle: "Diese Änderung betrifft…",
 		scopeThisTask: "Nur diese Aufgabe",
@@ -749,6 +773,7 @@ const TRANSLATIONS = {
 		viewModeAll: "Alle",
 		viewModeToday: "Heute",
 		viewModeProject: "Projekt",
+		viewModeRoutines: "Routinen",
 		todayButton: "Heute",
 		projectFilterPlaceholder: "Projekt wählen…",
 		noProjectGroup: "Ohne Projekt",
@@ -827,6 +852,10 @@ const TRANSLATIONS = {
 		settingsShowInCalendarName: "Show tasks in calendar",
 		settingsShowInCalendarDesc:
 			"Shows tasks with a due date as read-only entries in Plain Calendar, if installed.",
+		settingsShowRecurringTasksName: "Show recurring tasks in All/Today/Project",
+		settingsShowRecurringTasksDesc:
+			'Only affects the "All", "Today" and "Project" views. The "Routines" mode always shows recurring tasks regardless of this setting.',
+		toggleRecurringTasksLabel: "Show/hide recurring tasks",
 		contextMenuChangeStatusLabel: "Change status to",
 		scopeQuestionTitle: "This change applies to…",
 		scopeThisTask: "This task only",
@@ -839,6 +868,7 @@ const TRANSLATIONS = {
 		viewModeAll: "All",
 		viewModeToday: "Today",
 		viewModeProject: "Project",
+		viewModeRoutines: "Routines",
 		todayButton: "Today",
 		projectFilterPlaceholder: "Choose a project…",
 		noProjectGroup: "No project",
@@ -1434,7 +1464,7 @@ class TaskListView extends ItemView {
 
 			let slug = baseSlug;
 			let suffix = 2;
-			while (this.app.vault.getAbstractFileByPath(normalizePath(`${folderPath}/${slug}.md`))) {
+			while (this.app.vault.getAbstractFileByPath(normalizePath(`${folderPath}/${slug}/${slug}.md`))) {
 				slug = `${baseSlug}-${suffix}`;
 				suffix++;
 			}
@@ -1459,7 +1489,8 @@ class TaskListView extends ItemView {
 				`## Timeline\n` +
 				`- ${today}: File automatically created by plain-tasks, referenced from task "${taskRef.title}" (source: plain-tasks)\n`;
 
-			await this.app.vault.create(normalizePath(`${folderPath}/${slug}.md`), content);
+			await this.ensureFolder(normalizePath(`${folderPath}/${slug}`));
+			await this.app.vault.create(normalizePath(`${folderPath}/${slug}/${slug}.md`), content);
 			new Notice(t("projectCreatedNotice").replace("{title}", title));
 			return `[[${slug}]]`;
 		} catch (err) {
@@ -1528,7 +1559,7 @@ class TaskListView extends ItemView {
 	}
 
 	private isPartOfSeries(row: TaskRow): boolean {
-		return row.kind !== "single";
+		return isRecurringRow(row);
 	}
 
 	private editRow(row: TaskRow) {
@@ -1977,9 +2008,13 @@ class TaskListView extends ItemView {
 	// Applies the view mode as a pre-filter on the full row set, before the
 	// configured-status grouping runs. "all" is a no-op; "today"/"project"
 	// narrow the rows shown, they never change how the surviving rows are
-	// grouped.
+	// grouped. "routines" narrows to recurring rows only - see isRecurringRow.
+	// The showRecurringTasks setting itself is applied afterwards in
+	// renderInner, uniformly across every code path that produces a row set,
+	// not just this one - see there.
 	private filterRowsForMode(rows: TaskRow[]): TaskRow[] {
 		const mode = this.plugin.settings.viewMode;
+		if (mode === "routines") return rows.filter((row) => isRecurringRow(row));
 		if (mode === "today") return rows.filter((row) => matchesToday(row, this.viewDate, this.plugin.settings.statuses));
 		if (mode === "project") {
 			const project = this.plugin.settings.viewProject;
@@ -1992,6 +2027,16 @@ class TaskListView extends ItemView {
 	private async setViewMode(mode: TaskViewMode) {
 		if (this.plugin.settings.viewMode === mode) return;
 		this.plugin.settings.viewMode = mode;
+		await this.plugin.saveSettings();
+		this.render();
+	}
+
+	// Quick on-page toggle for the showRecurringTasks setting (see the same-
+	// named setting in TaskSettingTab) - a shortcut so this doesn't require a
+	// trip through the settings tab. Follows the same
+	// mutate-settings/saveSettings/re-render pattern as setViewMode etc.
+	private async toggleShowRecurringTasks() {
+		this.plugin.settings.showRecurringTasks = !this.plugin.settings.showRecurringTasks;
 		await this.plugin.saveSettings();
 		this.render();
 	}
@@ -2030,6 +2075,12 @@ class TaskListView extends ItemView {
 
 		const left = bar.createDiv({ cls: "plain-tasks-mode-bar-left" });
 		if (this.plugin.settings.viewMode === "today") this.renderDayNav(left);
+		// Project filter select lives on the left (with the other per-mode
+		// filter/nav controls like the day-nav above), while the mode
+		// switcher/recurring toggle on the right stay mode-independent - see
+		// below. Only one of the two ever renders at once since both are
+		// gated on viewMode.
+		if (this.plugin.settings.viewMode === "project") this.renderProjectSelect(left, options);
 
 		const right = bar.createDiv({ cls: "plain-tasks-mode-bar-right" });
 		const switcher = right.createDiv({ cls: "plain-tasks-pill" });
@@ -2038,6 +2089,7 @@ class TaskListView extends ItemView {
 			{ mode: "all", label: "viewModeAll" },
 			{ mode: "today", label: "viewModeToday" },
 			{ mode: "project", label: "viewModeProject" },
+			{ mode: "routines", label: "viewModeRoutines" },
 		];
 
 		for (const { mode, label } of modes) {
@@ -2049,22 +2101,37 @@ class TaskListView extends ItemView {
 			btn.onclick = () => this.setViewMode(mode);
 		}
 
-		if (this.plugin.settings.viewMode === "project") {
-			const select = right.createEl("select", { cls: "plain-tasks-project-select" });
-			select.createEl("option", { text: t("projectFilterPlaceholder"), value: "" });
+		// Quick access to the showRecurringTasks setting, always visible next to
+		// the mode switcher (not just while "routines" is active) - see
+		// toggleShowRecurringTasks. Its is-active state always reflects the
+		// current setting, whether it was last changed here or in
+		// TaskSettingTab, since both write to the same plugin.settings field.
+		const recurringToggle = right.createEl("button", {
+			cls: "plain-tasks-icon-toggle" + (this.plugin.settings.showRecurringTasks ? " is-active" : ""),
+			text: "↻",
+			attr: { "aria-label": t("toggleRecurringTasksLabel"), title: t("toggleRecurringTasksLabel") },
+		});
+		recurringToggle.onclick = () => this.toggleShowRecurringTasks();
+	}
 
-			const current = this.plugin.settings.viewProject;
-			const allOptions =
-				current && !options.some((o) => o.key === current)
-					? [...options, projectOptionForKey(this.app, current)].sort((a, b) => a.display.localeCompare(b.display))
-					: options;
+	// The project filter dropdown, only shown in "project" mode - rendered
+	// into the toolbar's left side (see renderModeBar) alongside the other
+	// per-mode filter/nav controls, e.g. the today mode's day-nav.
+	private renderProjectSelect(container: HTMLElement, options: ProjectOption[]) {
+		const select = container.createEl("select", { cls: "plain-tasks-project-select" });
+		select.createEl("option", { text: t("projectFilterPlaceholder"), value: "" });
 
-			for (const option of allOptions) {
-				select.createEl("option", { text: option.display, value: option.key });
-			}
-			select.value = allOptions.some((o) => o.key === current) ? current : "";
-			select.onchange = () => this.setViewProject(select.value);
+		const current = this.plugin.settings.viewProject;
+		const allOptions =
+			current && !options.some((o) => o.key === current)
+				? [...options, projectOptionForKey(this.app, current)].sort((a, b) => a.display.localeCompare(b.display))
+				: options;
+
+		for (const option of allOptions) {
+			select.createEl("option", { text: option.display, value: option.key });
 		}
+		select.value = allOptions.some((o) => o.key === current) ? current : "";
+		select.onchange = () => this.setViewProject(select.value);
 	}
 
 	private render() {
@@ -2101,12 +2168,20 @@ class TaskListView extends ItemView {
 		// backlog/triage behaviour (buildTaskRows + matchesToday) unchanged.
 		const viewMode = this.plugin.settings.viewMode;
 		const showAllGroupedByProject = viewMode === "project" && !this.plugin.settings.viewProject;
-		const rows =
+		let rows =
 			viewMode === "today" && this.viewDate !== todayKey
 				? buildTaskRowsForDay(this.tasks, this.seriesIndex, this.viewDate)
 				: showAllGroupedByProject
 				? buildTaskRows(this.tasks, this.seriesIndex, todayKey, statuses)
 				: this.filterRowsForMode(buildTaskRows(this.tasks, this.seriesIndex, todayKey, statuses));
+
+		// showRecurringTasks only hides recurring rows in "all"/"today"/
+		// "project" - "routines" always shows them (that's the view's whole
+		// purpose, and filterRowsForMode already narrowed it to recurring rows
+		// only above).
+		if (viewMode !== "routines" && !this.plugin.settings.showRecurringTasks) {
+			rows = rows.filter((row) => !isRecurringRow(row));
+		}
 
 		this.renderModeBar(container, distinctProjectOptions(this.app, this.tasks));
 
@@ -2375,6 +2450,16 @@ class TaskSettingTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.showInCalendar).onChange(async (value) => {
 					this.plugin.settings.showInCalendar = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName(t("settingsShowRecurringTasksName"))
+			.setDesc(t("settingsShowRecurringTasksDesc"))
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showRecurringTasks).onChange(async (value) => {
+					this.plugin.settings.showRecurringTasks = value;
 					await this.plugin.saveSettings();
 				})
 			);

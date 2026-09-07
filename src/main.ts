@@ -92,7 +92,7 @@ interface Task {
 	scheduled?: string; // YYYY-MM-DD
 	due?: string; // YYYY-MM-DD, the first/defining occurrence for recurring tasks
 	project?: string;
-	// Independent of `project` - a task can point at a goal (`01_Me/goals/*`,
+	// Independent of `project` - a task can point at a goal (`03_Goals/*`,
 	// see getAllGoalFiles), a project, both, or neither. Same wikilink
 	// convention as `project`, but never auto-created (see buildGoalDatalist/
 	// buildTaskFields): goals are deliberately created on purpose, not
@@ -547,14 +547,14 @@ function goalDisplayText(raw: string): string {
 
 // Frontmatter of a goal note as it comes out of the metadata cache - only the
 // fields Plain Tasks actually reads. Goal notes share `type: identity` with
-// other identity docs under 01_Me/ (see 01_Me/goals/*.md), so `type` alone
-// doesn't identify a goal - see isGoalFile.
+// other identity docs (see 03_Goals/*.md), so `type` alone doesn't identify a
+// goal - see isGoalFile.
 interface GoalFrontmatter {
 	title?: string;
 	type?: string;
 }
 
-const GOALS_FOLDER = "01_Me/goals/";
+const GOALS_FOLDER = "03_Goals/";
 
 // Resolves a `goal` frontmatter value (a wikilink like "[[karriere]]" or
 // plain free text) to a real vault file, same convention as
@@ -567,8 +567,8 @@ function resolveGoalFile(app: App, raw: string | undefined, sourcePath: string):
 }
 
 // Whether a resolved file is itself a goal note: `type: identity` (shared
-// with other 01_Me/ identity docs, hence not sufficient on its own) AND the
-// file actually lives under 01_Me/goals/ - see GOALS_FOLDER.
+// with other identity docs, hence not sufficient on its own) AND the file
+// actually lives under 03_Goals/ - see GOALS_FOLDER.
 function isGoalFile(app: App, file: TFile): boolean {
 	if (!file.path.startsWith(GOALS_FOLDER)) return false;
 	const fm = app.metadataCache.getFileCache(file)?.frontmatter as GoalFrontmatter | undefined;
@@ -582,7 +582,7 @@ function goalDisplayForFile(app: App, file: TFile): string {
 	return fm?.title ? String(fm.title) : file.basename;
 }
 
-// Every markdown file under 01_Me/goals/ that is a goal note (see isGoalFile).
+// Every markdown file under 03_Goals/ that is a goal note (see isGoalFile).
 function getAllGoalFiles(app: App): TFile[] {
 	return app.vault.getMarkdownFiles().filter((file) => isGoalFile(app, file));
 }
@@ -1077,7 +1077,7 @@ function buildProjectDatalist(app: App, contentEl: HTMLElement, datalistId: stri
 	}
 }
 
-// Same as buildProjectDatalist, but sourced from goal notes (01_Me/goals/,
+// Same as buildProjectDatalist, but sourced from goal notes (03_Goals/,
 // see getAllGoalFiles) instead of project notes.
 function buildGoalDatalist(app: App, contentEl: HTMLElement, datalistId: string) {
 	const datalist = contentEl.createEl("datalist", { attr: { id: datalistId } });

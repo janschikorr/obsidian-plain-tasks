@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.1
+
+- Fixed: the `goal` field looked for goal notes under `01_Me/goals/`, a folder that never existed in the reference vault - goals actually live in `03_Goals/` (see `98_Rules/templates/goal.md`). The field never resolved anything in 1.10.0; goal lookup now points at `03_Goals/`
+
 ## 1.10.0
 
 - Added: `goal` field on tasks, independent of `project` - a task can reference a goal (`01_Me/goals/*`), a project, both, or neither. Same `[[wikilink]]` convention and datalist-of-existing-notes UX as project, but an unresolved goal is never auto-created on save (goals are created deliberately, not scaffolded from a task)

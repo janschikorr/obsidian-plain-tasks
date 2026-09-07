@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.0
+
+- Added: `goal` field on tasks, independent of `project` - a task can reference a goal (`01_Me/goals/*`), a project, both, or neither. Same `[[wikilink]]` convention and datalist-of-existing-notes UX as project, but an unresolved goal is never auto-created on save (goals are created deliberately, not scaffolded from a task)
+- Goal chips render next to project chips in list/card view; clicking one opens the resolved goal note
+
 ## 1.9.0
 
 - Added: "Routinen" (Routines) view mode - lists recurring tasks (series and their generated occurrences) using the same status-sectioned list as Today/Project, not the Kanban board

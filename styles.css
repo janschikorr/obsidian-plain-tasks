@@ -302,6 +302,25 @@
 	font-style: italic;
 }
 
+.plain-tasks-chip-goal {
+	color: var(--text-accent);
+	cursor: pointer;
+}
+
+.plain-tasks-chip-goal:hover {
+	text-decoration: underline;
+}
+
+/* Goal value didn't resolve to a real vault file (typo, deleted note, or
+   genuinely free text) - dimmed like the project equivalent, but not
+   clickable at all: unlike project, there's no goal view mode to filter
+   into, so an unresolved goal has nothing to open. */
+.plain-tasks-chip-goal-unresolved {
+	color: var(--text-muted);
+	font-style: italic;
+	cursor: default;
+}
+
 /* Not an error - currently only used for the project field's "will be
    created on save" hint, so a neutral muted tone rather than a warning
    color (nothing here is actually blocking or wrong). */

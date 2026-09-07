@@ -92,6 +92,12 @@ interface Task {
 	scheduled?: string; // YYYY-MM-DD
 	due?: string; // YYYY-MM-DD, the first/defining occurrence for recurring tasks
 	project?: string;
+	// Independent of `project` - a task can point at a goal (`01_Me/goals/*`,
+	// see getAllGoalFiles), a project, both, or neither. Same wikilink
+	// convention as `project`, but never auto-created (see buildGoalDatalist/
+	// buildTaskFields): goals are deliberately created on purpose, not
+	// scaffolded from a task reference.
+	goal?: string;
 	recurrence?: string; // RRULE-lite, e.g. "FREQ=WEEKLY;INTERVAL=2" - anchored on `due`
 	excludedDates?: string[]; // master only: deleted occurrences (like ICS EXDATE)
 	seriesPath?: string; // exception only: vault path of the master note this replaces a slot in
@@ -110,6 +116,7 @@ interface TaskFrontmatter {
 	scheduled?: string;
 	due?: string;
 	project?: string;
+	goal?: string;
 	recurrence?: string;
 	excluded?: string[] | string;
 	series?: string;
@@ -189,6 +196,7 @@ function parseTask(file: TFile, fm: TaskFrontmatter, requiredTag: string): Task 
 		scheduled: fm.scheduled ? String(fm.scheduled).slice(0, 10) : undefined,
 		due,
 		project: fm.project ? String(fm.project) : undefined,
+		goal: fm.goal ? String(fm.goal) : undefined,
 		recurrence,
 		excludedDates,
 		seriesPath: fm.series ? String(fm.series) : undefined,
@@ -528,6 +536,57 @@ function getAllProjectFiles(app: App): TFile[] {
 	return app.vault.getMarkdownFiles().filter((file) => isProjectFile(app, file));
 }
 
+// Same as projectDisplayText, but for the `goal` field's raw text.
+function goalDisplayText(raw: string): string {
+	const match = raw.match(/^\[\[(.+)\]\]$/);
+	if (!match) return raw;
+	const inner = match[1];
+	const pipeIdx = inner.indexOf("|");
+	return pipeIdx >= 0 ? inner.slice(0, pipeIdx) : inner;
+}
+
+// Frontmatter of a goal note as it comes out of the metadata cache - only the
+// fields Plain Tasks actually reads. Goal notes share `type: identity` with
+// other identity docs under 01_Me/ (see 01_Me/goals/*.md), so `type` alone
+// doesn't identify a goal - see isGoalFile.
+interface GoalFrontmatter {
+	title?: string;
+	type?: string;
+}
+
+const GOALS_FOLDER = "01_Me/goals/";
+
+// Resolves a `goal` frontmatter value (a wikilink like "[[karriere]]" or
+// plain free text) to a real vault file, same convention as
+// resolveProjectFile.
+function resolveGoalFile(app: App, raw: string | undefined, sourcePath: string): TFile | null {
+	if (!raw) return null;
+	const match = raw.match(/^\[\[([^\]|]+)(\|[^\]]+)?\]\]$/);
+	const linktext = match ? match[1] : raw;
+	return app.metadataCache.getFirstLinkpathDest(linktext, sourcePath);
+}
+
+// Whether a resolved file is itself a goal note: `type: identity` (shared
+// with other 01_Me/ identity docs, hence not sufficient on its own) AND the
+// file actually lives under 01_Me/goals/ - see GOALS_FOLDER.
+function isGoalFile(app: App, file: TFile): boolean {
+	if (!file.path.startsWith(GOALS_FOLDER)) return false;
+	const fm = app.metadataCache.getFileCache(file)?.frontmatter as GoalFrontmatter | undefined;
+	return fm?.type === "identity";
+}
+
+// Display text for a resolved goal file: its frontmatter `title` if set,
+// otherwise the filename without extension.
+function goalDisplayForFile(app: App, file: TFile): string {
+	const fm = app.metadataCache.getFileCache(file)?.frontmatter as GoalFrontmatter | undefined;
+	return fm?.title ? String(fm.title) : file.basename;
+}
+
+// Every markdown file under 01_Me/goals/ that is a goal note (see isGoalFile).
+function getAllGoalFiles(app: App): TFile[] {
+	return app.vault.getMarkdownFiles().filter((file) => isGoalFile(app, file));
+}
+
 // Human-readable title implied by a `project` field's raw text, used both to
 // name an auto-created project note and to preview that name in the
 // create/edit dialog's hint (see TaskListView.resolveOrCreateProject and
@@ -701,6 +760,9 @@ const TRANSLATIONS = {
 		dueLabel: "Fällig am",
 		projectLabel: "Projekt",
 		projectPlaceholder: "Freitext, z. B. Projektname",
+		goalLabel: "Ziel",
+		goalPlaceholder: "Freitext, z. B. Zielname",
+		goalNotFoundSuffix: "nicht gefunden",
 		recurrenceLabel: "Wiederholung",
 		recurrenceNone: "Keine",
 		recurrenceDaily: "Täglich",
@@ -796,6 +858,9 @@ const TRANSLATIONS = {
 		dueLabel: "Due",
 		projectLabel: "Project",
 		projectPlaceholder: "Free text, e.g. project name",
+		goalLabel: "Goal",
+		goalPlaceholder: "Free text, e.g. goal name",
+		goalNotFoundSuffix: "not found",
 		recurrenceLabel: "Repeat",
 		recurrenceNone: "None",
 		recurrenceDaily: "Daily",
@@ -901,6 +966,7 @@ interface TaskFormValues {
 	scheduled: string;
 	due: string;
 	project: string;
+	goal: string;
 	recurrenceFreq: "" | RecurrenceFreq;
 	recurrenceInterval: string; // numeric text, e.g. "2" for "every 2 weeks"
 	recurrenceEndType: RecurrenceEndType;
@@ -1011,6 +1077,16 @@ function buildProjectDatalist(app: App, contentEl: HTMLElement, datalistId: stri
 	}
 }
 
+// Same as buildProjectDatalist, but sourced from goal notes (01_Me/goals/,
+// see getAllGoalFiles) instead of project notes.
+function buildGoalDatalist(app: App, contentEl: HTMLElement, datalistId: string) {
+	const datalist = contentEl.createEl("datalist", { attr: { id: datalistId } });
+	for (const file of getAllGoalFiles(app)) {
+		const label = goalDisplayForFile(app, file);
+		datalist.createEl("option", { attr: { value: `[[${file.basename}]]`, label }, text: label });
+	}
+}
+
 function buildTaskFields(
 	app: App,
 	contentEl: HTMLElement,
@@ -1084,6 +1160,40 @@ function buildTaskFields(
 	};
 	updateProjectWarning();
 
+	// Independent of the project field above - a task can reference a goal, a
+	// project, both, or neither (see the `goal` field on Task/TaskFrontmatter).
+	// Unlike project, an unresolved goal is never auto-created on save (goals
+	// are created deliberately, see resolveGoalFile's callers) - the warning
+	// here is purely informational, not a "will be created" hint.
+	const goalDatalistId = `plain-tasks-goal-list-${Math.random().toString(36).slice(2)}`;
+	new Setting(contentEl).setName(t("goalLabel")).addText((text) => {
+		text.setValue(values.goal).setPlaceholder(t("goalPlaceholder"));
+		text.inputEl.setAttribute("list", goalDatalistId);
+		text.onChange((v) => {
+			values.goal = v.trim();
+			updateGoalWarning();
+		});
+		text.inputEl.addEventListener("blur", () => updateGoalWarning());
+	});
+	buildGoalDatalist(app, contentEl, goalDatalistId);
+
+	const goalWarning = contentEl.createDiv({ cls: "plain-tasks-field-warning" });
+	const updateGoalWarning = () => {
+		goalWarning.empty();
+		if (!values.goal) {
+			goalWarning.removeClass("is-visible");
+			return;
+		}
+		const file = resolveGoalFile(app, values.goal, sourcePath);
+		if (!file || !isGoalFile(app, file)) {
+			goalWarning.setText(`${goalDisplayText(values.goal)} (${t("goalNotFoundSuffix")})`);
+			goalWarning.addClass("is-visible");
+		} else {
+			goalWarning.removeClass("is-visible");
+		}
+	};
+	updateGoalWarning();
+
 	if (opts.showRecurrence === false) return;
 
 	new Setting(contentEl).setName(t("recurrenceLabel")).addDropdown((dropdown) => {
@@ -1120,6 +1230,7 @@ class NewTaskModal extends Modal {
 			scheduled: "",
 			due: "",
 			project: "",
+			goal: "",
 			recurrenceFreq: "",
 			recurrenceInterval: "1",
 			recurrenceEndType: "never",
@@ -1183,6 +1294,7 @@ class EditTaskModal extends Modal {
 			scheduled: task.scheduled ?? "",
 			due: task.due ?? "",
 			project: task.project ?? "",
+			goal: task.goal ?? "",
 			recurrenceFreq: rule?.freq ?? "",
 			recurrenceInterval: String(rule?.interval ?? 1),
 			recurrenceEndType: rule?.until ? "until" : rule?.count ? "count" : "never",
@@ -1399,6 +1511,7 @@ class TaskListView extends ItemView {
 		scheduled?: string;
 		due?: string;
 		project?: string;
+		goal?: string;
 		recurrence?: string;
 		excludedDates?: string[];
 		seriesPath?: string;
@@ -1419,6 +1532,7 @@ class TaskListView extends ItemView {
 		if (fields.scheduled) frontmatter += `scheduled: ${fields.scheduled}\n`;
 		if (fields.due) frontmatter += `due: ${fields.due}\n`;
 		if (fields.project) frontmatter += `project: ${fields.project}\n`;
+		if (fields.goal) frontmatter += `goal: ${fields.goal}\n`;
 		if (fields.recurrence) frontmatter += `recurrence: ${fields.recurrence}\n`;
 		if (fields.excludedDates?.length) {
 			frontmatter += `excluded:\n${fields.excludedDates.map((d) => `  - ${d}`).join("\n")}\n`;
@@ -1524,6 +1638,7 @@ class TaskListView extends ItemView {
 					priority: values.priority,
 					scheduled: values.scheduled || undefined,
 					due: values.due || undefined,
+					goal: values.goal || undefined,
 					recurrence: combineRecurrence(values) || undefined,
 				});
 				const project = await this.resolveOrCreateProject(values.project, { basename: file.basename, title: values.title });
@@ -1600,6 +1715,7 @@ class TaskListView extends ItemView {
 						fm.scheduled = values.scheduled || undefined;
 						fm.due = values.due || undefined;
 						fm.project = project;
+						fm.goal = values.goal || undefined;
 						fm.recurrence = combineRecurrence(values) || undefined;
 						fm.dateModified = toDateKey(new Date());
 					},
@@ -1656,6 +1772,7 @@ class TaskListView extends ItemView {
 					status: statusId,
 					priority: master.priority,
 					project: master.project,
+					goal: master.goal,
 					due: row.effectiveDue,
 					seriesPath: master.file.path,
 					replacesDate: row.effectiveDue,
@@ -1710,6 +1827,7 @@ class TaskListView extends ItemView {
 							fm.scheduled = values.scheduled || undefined;
 							fm.due = values.due || undefined;
 							fm.project = project;
+							fm.goal = values.goal || undefined;
 							fm.dateModified = toDateKey(new Date());
 						},
 						t("errorSaveFailed")
@@ -1735,6 +1853,7 @@ class TaskListView extends ItemView {
 						priority: values.priority,
 						scheduled: values.scheduled || undefined,
 						due: values.due || undefined,
+						goal: values.goal || undefined,
 						seriesPath: master.file.path,
 						replacesDate: row.effectiveDue,
 					});
@@ -1801,6 +1920,7 @@ class TaskListView extends ItemView {
 						fm.scheduled = values.scheduled || undefined;
 						fm.due = values.due || undefined;
 						fm.project = project;
+						fm.goal = values.goal || undefined;
 						fm.recurrence = combineRecurrence(values) || undefined;
 						fm.dateModified = toDateKey(new Date());
 					},
@@ -1860,6 +1980,7 @@ class TaskListView extends ItemView {
 			status: master.status,
 			priority: master.priority,
 			project: master.project,
+			goal: master.goal,
 			due: splitDate,
 			recurrence: buildRecurrenceRuleString(newRule),
 			excludedDates: (master.excludedDates ?? []).filter((d) => d >= splitDate),
@@ -1906,6 +2027,7 @@ class TaskListView extends ItemView {
 							fm.scheduled = values.scheduled || undefined;
 							fm.due = values.due || undefined;
 							fm.project = project;
+							fm.goal = values.goal || undefined;
 							fm.recurrence = combineRecurrence(values) || undefined;
 							fm.dateModified = toDateKey(new Date());
 						},
@@ -2346,6 +2468,7 @@ class TaskListView extends ItemView {
 			});
 		}
 		if (row.display.project) this.renderProjectChip(meta, row.display.project, row.display.file.path);
+		if (row.display.goal) this.renderGoalChip(meta, row.display.goal, row.display.file.path);
 
 		card.onclick = () => this.editRow(row);
 		card.oncontextmenu = (e) => this.showRowContextMenu(e, row);
@@ -2368,6 +2491,25 @@ class TaskListView extends ItemView {
 			e.stopPropagation();
 			this.selectProject(key);
 		};
+	}
+
+	// Same idea as renderProjectChip, but for `goal`. There's no goal view
+	// mode (see filterRowsForMode) to switch into, so clicking just opens the
+	// resolved goal note directly - an unresolved value is still shown (dimmed,
+	// "not found"), but isn't clickable since there's nothing to open.
+	private renderGoalChip(meta: HTMLElement, goal: string, sourcePath: string) {
+		const file = resolveGoalFile(this.app, goal, sourcePath);
+		const display = file ? goalDisplayForFile(this.app, file) : `${goalDisplayText(goal)} (${t("goalNotFoundSuffix")})`;
+		const chip = meta.createSpan({
+			cls: "plain-tasks-chip plain-tasks-chip-goal" + (file ? "" : " plain-tasks-chip-goal-unresolved"),
+			text: display,
+		});
+		if (file) {
+			chip.onclick = (e) => {
+				e.stopPropagation();
+				this.openTask(file);
+			};
+		}
 	}
 
 	private renderRow(parent: HTMLElement, row: TaskRow, todayKey: string, doneId: string | undefined) {
@@ -2396,6 +2538,7 @@ class TaskListView extends ItemView {
 			});
 		}
 		if (row.display.project) this.renderProjectChip(meta, row.display.project, row.display.file.path);
+		if (row.display.goal) this.renderGoalChip(meta, row.display.goal, row.display.file.path);
 
 		item.onclick = () => this.editRow(row);
 		item.oncontextmenu = (e) => this.showRowContextMenu(e, row);

@@ -370,8 +370,13 @@ function nextVisibleOccurrence(
 
 	for (let idx = 0; idx < MAX_OCCURRENCE_SCAN; idx++) {
 		if (rule.count !== undefined && idx >= rule.count) return null;
-		const key = toDateKey(occurrenceDateAt(rule, start, idx));
+		const date = occurrenceDateAt(rule, start, idx);
+		const key = toDateKey(date);
 		if (rule.until && key > rule.until) return null;
+		// Month/year arithmetic overflows a missing day (Jan 31 + 1 month =
+		// Mar 3, Feb 29 + 1 year = Mar 1) - such a slot doesn't exist in the
+		// pattern (occurrenceIndex/occurrenceOnDate reject it too), skip it.
+		if (occurrenceIndex(rule, start, date) !== idx) continue;
 		if (master.excludedDates?.includes(key)) continue;
 		const exception = exceptionsByDate?.get(key);
 		if (exception && statusIdFor(exception.status, statuses) === doneId) continue;
@@ -427,6 +432,9 @@ function buildTaskRowsForDay(tasks: Task[], index: SeriesIndex, dateKey: string)
 	for (const master of index.mastersByPath.values()) {
 		const occ = occurrenceOnDate(master, index, dateKey);
 		if (!occ) continue;
+		// An exception moved to another date belongs to that date (picked up by
+		// the loop below), not to the pattern slot it replaces.
+		if (occ.exception?.due && occ.exception.due !== dateKey) continue;
 		if (occ.exception) {
 			rows.push({ display: occ.exception, effectiveDue: occ.date, kind: "exception", master });
 			usedExceptionPaths.add(occ.exception.file.path);
@@ -466,7 +474,10 @@ function buildTaskRows(tasks: Task[], index: SeriesIndex, todayKey: string, stat
 		const next = nextVisibleOccurrence(master, index, todayKey, statuses);
 		if (!next) continue;
 		if (next.exception) {
-			rows.push({ display: next.exception, effectiveDue: next.date, kind: "exception", master });
+			// The exception's own `due` wins (an occurrence moved via "this task
+			// only"), same as for exception rows in the loop below; the pattern
+			// slot stays available via seriesSlotDate.
+			rows.push({ display: next.exception, effectiveDue: next.exception.due ?? next.date, kind: "exception", master });
 			usedExceptionPaths.add(next.exception.file.path);
 		} else {
 			rows.push({ display: { ...master, due: next.date }, effectiveDue: next.date, kind: "master", master });
@@ -699,6 +710,15 @@ function isRecurringRow(row: TaskRow): boolean {
 	return row.kind !== "single";
 }
 
+// The pattern slot a series row stands for - for an exception that's its
+// `replaces` date, which differs from effectiveDue once the occurrence was
+// moved to another day. Series-splitting operations ("this and following")
+// must use the slot: occurrenceIndex of a moved date is null, which would
+// otherwise fall back to the whole series.
+function seriesSlotDate(row: TaskRow): string | undefined {
+	return row.kind === "exception" ? row.display.replacesDate ?? row.effectiveDue : row.effectiveDue;
+}
+
 function sortRowsInPlace(rows: TaskRow[]) {
 	rows.sort((a, b) => {
 		const ad = a.effectiveDue ?? "9999-99-99";
@@ -711,6 +731,16 @@ function sortRowsInPlace(rows: TaskRow[]) {
 		if (at !== bt) return at < bt ? -1 : 1;
 		return a.display.title.localeCompare(b.display.title);
 	});
+}
+
+// Free text written verbatim into hand-built frontmatter (see createNote)
+// must be quoted: unquoted, a title like "Call: Bob" is invalid YAML (the
+// whole frontmatter fails to parse and the task silently disappears), "Fix #12"
+// loses everything after " #" as a comment, and a wikilink like "[[foo]]"
+// parses as a nested list instead of a link string. A JSON string literal is
+// a valid YAML double-quoted scalar.
+function yamlString(value: string): string {
+	return JSON.stringify(value);
 }
 
 function toDateKey(d: Date): string {
@@ -1578,7 +1608,7 @@ class TaskListView extends ItemView {
 
 		let frontmatter =
 			`---\n` +
-			`title: ${fields.title}\n` +
+			`title: ${yamlString(fields.title)}\n` +
 			`tags:\n  - ${this.plugin.settings.taskTag}\n` +
 			`status: ${fields.status}\n` +
 			`priority: ${fields.priority}\n`;
@@ -1586,8 +1616,8 @@ class TaskListView extends ItemView {
 		if (fields.due) frontmatter += `due: ${fields.due}\n`;
 		if (fields.time) frontmatter += `time: ${fields.time}\n`;
 		if (fields.end) frontmatter += `end: ${fields.end}\n`;
-		if (fields.project) frontmatter += `project: ${fields.project}\n`;
-		if (fields.goal) frontmatter += `goal: ${fields.goal}\n`;
+		if (fields.project) frontmatter += `project: ${yamlString(fields.project)}\n`;
+		if (fields.goal) frontmatter += `goal: ${yamlString(fields.goal)}\n`;
 		if (fields.recurrence) frontmatter += `recurrence: ${fields.recurrence}\n`;
 		if (fields.excludedDates?.length) {
 			frontmatter += `excluded:\n${fields.excludedDates.map((d) => `  - ${d}`).join("\n")}\n`;
@@ -2072,9 +2102,10 @@ class TaskListView extends ItemView {
 
 	private async editThisAndFollowing(row: TaskRow) {
 		const master = row.master;
-		if (!master || !row.effectiveDue) return;
+		const slot = seriesSlotDate(row);
+		if (!master || !slot) return;
 		try {
-			const newMaster = await this.splitSeriesAt(master, row.effectiveDue);
+			const newMaster = await this.splitSeriesAt(master, slot);
 			if (!newMaster) {
 				this.editSeries(row);
 				return;
@@ -2116,11 +2147,12 @@ class TaskListView extends ItemView {
 
 	private async deleteThisAndFollowing(row: TaskRow) {
 		const master = row.master;
-		if (!master || !master.due || !row.effectiveDue) return;
+		const slot = seriesSlotDate(row);
+		if (!master || !master.due || !slot) return;
 		const rule = parseRecurrenceRule(master.recurrence ?? "");
 		if (!rule) return;
 		const start = parseDateKey(master.due);
-		const idx = occurrenceIndex(rule, start, parseDateKey(row.effectiveDue));
+		const idx = occurrenceIndex(rule, start, parseDateKey(slot));
 		if (idx === null || idx <= 0) {
 			await this.deleteSeries(row);
 			return;
@@ -2128,14 +2160,14 @@ class TaskListView extends ItemView {
 		try {
 			await this.app.fileManager.processFrontMatter(master.file, (fm) => {
 				fm.recurrence = buildRecurrenceRuleString({ freq: rule.freq, interval: rule.interval, count: idx });
-				fm.excluded = (master.excludedDates ?? []).filter((d) => d < row.effectiveDue!);
+				fm.excluded = (master.excludedDates ?? []).filter((d) => d < slot);
 				fm.dateModified = toDateKey(new Date());
 			});
 			await this.waitForMetadata(master.file);
 
 			const exceptions = this.seriesIndex.exceptionsBySeries.get(master.file.path) ?? [];
 			for (const exc of exceptions) {
-				if ((exc.replacesDate ?? "") >= row.effectiveDue) {
+				if ((exc.replacesDate ?? "") >= slot) {
 					await this.app.fileManager.trashFile(exc.file);
 				}
 			}
@@ -2526,6 +2558,12 @@ class TaskListView extends ItemView {
 				if (!key) return;
 				const row = this.rowsById.get(key);
 				if (!row) return;
+				// Dropped back onto its own column: nothing to change. Without
+				// this, the note was rewritten anyway (dateModified bumped, which
+				// also resets hideOldDone's 7-day window), and a not-yet-
+				// materialized occurrence of a series whose master is already
+				// "done" got a new exception note created for it.
+				if (rowStatusId(row, statuses) === status.id) return;
 				this.setRowStatus(row, status.id);
 			};
 		}

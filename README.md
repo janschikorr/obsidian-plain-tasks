@@ -98,6 +98,8 @@ status: open           # any of your configured status IDs (default: open | in-p
 priority: normal        # low | normal | high
 scheduled: <YYYY-MM-DD>  # optional
 due: <YYYY-MM-DD>        # optional
+time: <HH:mm>            # optional, time of day (shown as a chip, sorts tasks within a day)
+end: <HH:mm>             # optional, end of that time span
 project: <text>          # optional, usually a wikilink like [[project-note]], see below
 recurrence: <FREQ=...>   # optional, only valid together with `due`, see below
 ---

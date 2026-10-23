@@ -91,6 +91,11 @@ interface Task {
 	priority: TaskPriority;
 	scheduled?: string; // YYYY-MM-DD
 	due?: string; // YYYY-MM-DD, the first/defining occurrence for recurring tasks
+	// Optional time of day on `due` (HH:mm) and its end - same field names and
+	// format as Plain Calendar's event `time`/`end`. Display/sort only: the
+	// overdue marker and recurrence still work on whole days.
+	time?: string;
+	end?: string;
 	project?: string;
 	// Independent of `project` - a task can point at a goal (`03_Goals/*`,
 	// see getAllGoalFiles), a project, both, or neither. Same wikilink
@@ -115,6 +120,8 @@ interface TaskFrontmatter {
 	priority?: string;
 	scheduled?: string;
 	due?: string;
+	time?: string;
+	end?: string;
 	project?: string;
 	goal?: string;
 	recurrence?: string;
@@ -195,6 +202,8 @@ function parseTask(file: TFile, fm: TaskFrontmatter, requiredTag: string): Task 
 		priority: normalizePriority(fm.priority),
 		scheduled: fm.scheduled ? String(fm.scheduled).slice(0, 10) : undefined,
 		due,
+		time: fm.time ? String(fm.time) : undefined,
+		end: fm.end ? String(fm.end) : undefined,
 		project: fm.project ? String(fm.project) : undefined,
 		goal: fm.goal ? String(fm.goal) : undefined,
 		recurrence,
@@ -695,6 +704,11 @@ function sortRowsInPlace(rows: TaskRow[]) {
 		const ad = a.effectiveDue ?? "9999-99-99";
 		const bd = b.effectiveDue ?? "9999-99-99";
 		if (ad !== bd) return ad < bd ? -1 : 1;
+		// Same day: timed tasks first, in time order (padded so a hand-written
+		// "9:00" sorts before "10:00"), then untimed ones by title.
+		const at = a.display.time ? a.display.time.padStart(5, "0") : "99:99";
+		const bt = b.display.time ? b.display.time.padStart(5, "0") : "99:99";
+		if (at !== bt) return at < bt ? -1 : 1;
 		return a.display.title.localeCompare(b.display.title);
 	});
 }
@@ -758,6 +772,11 @@ const TRANSLATIONS = {
 		priorityHigh: "Hoch",
 		scheduledLabel: "Geplant für",
 		dueLabel: "Fällig am",
+		timeLabel: "Zeit",
+		timeDesc: "Leer = ohne Uhrzeit",
+		endTimeLabel: "Ende",
+		errorTimeFormat: "Zeit muss im Format HH:mm sein",
+		errorEndTimeFormat: "Ende muss im Format HH:mm sein",
 		projectLabel: "Projekt",
 		projectPlaceholder: "Freitext, z. B. Projektname",
 		goalLabel: "Ziel",
@@ -856,6 +875,11 @@ const TRANSLATIONS = {
 		priorityHigh: "High",
 		scheduledLabel: "Scheduled",
 		dueLabel: "Due",
+		timeLabel: "Time",
+		timeDesc: "Empty = no specific time",
+		endTimeLabel: "End time",
+		errorTimeFormat: "Time must be in HH:mm format",
+		errorEndTimeFormat: "End time must be in HH:mm format",
 		projectLabel: "Project",
 		projectPlaceholder: "Free text, e.g. project name",
 		goalLabel: "Goal",
@@ -965,6 +989,8 @@ interface TaskFormValues {
 	priority: TaskPriority;
 	scheduled: string;
 	due: string;
+	time: string; // HH:mm or empty
+	end: string; // HH:mm or empty
 	project: string;
 	goal: string;
 	recurrenceFreq: "" | RecurrenceFreq;
@@ -997,6 +1023,8 @@ function validateTaskFormValues(values: TaskFormValues): string | null {
 	if (!values.title.trim()) return t("errorTitleMissing");
 	if (values.scheduled && !/^\d{4}-\d{2}-\d{2}$/.test(values.scheduled)) return t("errorScheduledFormat");
 	if (values.due && !/^\d{4}-\d{2}-\d{2}$/.test(values.due)) return t("errorDueFormat");
+	if (values.time && !/^\d{1,2}:\d{2}$/.test(values.time)) return t("errorTimeFormat");
+	if (values.end && !/^\d{1,2}:\d{2}$/.test(values.end)) return t("errorEndTimeFormat");
 
 	if (values.recurrenceFreq) {
 		if (!values.due) return t("errorRecurrenceNeedsDue");
@@ -1126,6 +1154,19 @@ function buildTaskFields(
 		text.setValue(values.due).onChange((v) => (values.due = v.trim()));
 	});
 
+	new Setting(contentEl)
+		.setName(t("timeLabel"))
+		.setDesc(t("timeDesc"))
+		.addText((text) => {
+			text.inputEl.type = "time";
+			text.setValue(values.time).onChange((v) => (values.time = v.trim()));
+		});
+
+	new Setting(contentEl).setName(t("endTimeLabel")).addText((text) => {
+		text.inputEl.type = "time";
+		text.setValue(values.end).onChange((v) => (values.end = v.trim()));
+	});
+
 	const datalistId = `plain-tasks-project-list-${Math.random().toString(36).slice(2)}`;
 	new Setting(contentEl).setName(t("projectLabel")).addText((text) => {
 		text.setValue(values.project).setPlaceholder(t("projectPlaceholder"));
@@ -1229,6 +1270,8 @@ class NewTaskModal extends Modal {
 			priority: "normal",
 			scheduled: "",
 			due: "",
+			time: "",
+			end: "",
 			project: "",
 			goal: "",
 			recurrenceFreq: "",
@@ -1293,6 +1336,8 @@ class EditTaskModal extends Modal {
 			priority: task.priority,
 			scheduled: task.scheduled ?? "",
 			due: task.due ?? "",
+			time: task.time ?? "",
+			end: task.end ?? "",
 			project: task.project ?? "",
 			goal: task.goal ?? "",
 			recurrenceFreq: rule?.freq ?? "",
@@ -1510,6 +1555,8 @@ class TaskListView extends ItemView {
 		priority: TaskPriority;
 		scheduled?: string;
 		due?: string;
+		time?: string;
+		end?: string;
 		project?: string;
 		goal?: string;
 		recurrence?: string;
@@ -1521,7 +1568,13 @@ class TaskListView extends ItemView {
 		await this.ensureFolder(folderPath);
 		const today = toDateKey(new Date());
 		const prefix = fields.due ?? fields.scheduled ?? today;
-		const path = normalizePath(`${folderPath}/${this.safeFileName(fields.title, prefix)}`);
+		// Same title on the same date (e.g. a "this occurrence only" exception
+		// of a series' first occurrence, which shares the master's date and
+		// title) would otherwise make vault.create() throw "already exists".
+		let path = normalizePath(`${folderPath}/${this.safeFileName(fields.title, prefix)}`);
+		for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) {
+			path = normalizePath(`${folderPath}/${this.safeFileName(`${fields.title} ${n}`, prefix)}`);
+		}
 
 		let frontmatter =
 			`---\n` +
@@ -1531,6 +1584,8 @@ class TaskListView extends ItemView {
 			`priority: ${fields.priority}\n`;
 		if (fields.scheduled) frontmatter += `scheduled: ${fields.scheduled}\n`;
 		if (fields.due) frontmatter += `due: ${fields.due}\n`;
+		if (fields.time) frontmatter += `time: ${fields.time}\n`;
+		if (fields.end) frontmatter += `end: ${fields.end}\n`;
 		if (fields.project) frontmatter += `project: ${fields.project}\n`;
 		if (fields.goal) frontmatter += `goal: ${fields.goal}\n`;
 		if (fields.recurrence) frontmatter += `recurrence: ${fields.recurrence}\n`;
@@ -1638,6 +1693,8 @@ class TaskListView extends ItemView {
 					priority: values.priority,
 					scheduled: values.scheduled || undefined,
 					due: values.due || undefined,
+					time: values.time || undefined,
+					end: values.end || undefined,
 					goal: values.goal || undefined,
 					recurrence: combineRecurrence(values) || undefined,
 				});
@@ -1714,6 +1771,8 @@ class TaskListView extends ItemView {
 						fm.priority = values.priority;
 						fm.scheduled = values.scheduled || undefined;
 						fm.due = values.due || undefined;
+						fm.time = values.time || undefined;
+						fm.end = values.end || undefined;
 						fm.project = project;
 						fm.goal = values.goal || undefined;
 						fm.recurrence = combineRecurrence(values) || undefined;
@@ -1774,6 +1833,8 @@ class TaskListView extends ItemView {
 					project: master.project,
 					goal: master.goal,
 					due: row.effectiveDue,
+					time: master.time,
+					end: master.end,
 					seriesPath: master.file.path,
 					replacesDate: row.effectiveDue,
 				});
@@ -1826,6 +1887,8 @@ class TaskListView extends ItemView {
 							fm.priority = values.priority;
 							fm.scheduled = values.scheduled || undefined;
 							fm.due = values.due || undefined;
+							fm.time = values.time || undefined;
+							fm.end = values.end || undefined;
 							fm.project = project;
 							fm.goal = values.goal || undefined;
 							fm.dateModified = toDateKey(new Date());
@@ -1853,6 +1916,8 @@ class TaskListView extends ItemView {
 						priority: values.priority,
 						scheduled: values.scheduled || undefined,
 						due: values.due || undefined,
+						time: values.time || undefined,
+						end: values.end || undefined,
 						goal: values.goal || undefined,
 						seriesPath: master.file.path,
 						replacesDate: row.effectiveDue,
@@ -1919,6 +1984,8 @@ class TaskListView extends ItemView {
 						fm.priority = values.priority;
 						fm.scheduled = values.scheduled || undefined;
 						fm.due = values.due || undefined;
+						fm.time = values.time || undefined;
+						fm.end = values.end || undefined;
 						fm.project = project;
 						fm.goal = values.goal || undefined;
 						fm.recurrence = combineRecurrence(values) || undefined;
@@ -1982,6 +2049,8 @@ class TaskListView extends ItemView {
 			project: master.project,
 			goal: master.goal,
 			due: splitDate,
+			time: master.time,
+			end: master.end,
 			recurrence: buildRecurrenceRuleString(newRule),
 			excludedDates: (master.excludedDates ?? []).filter((d) => d >= splitDate),
 		});
@@ -2026,6 +2095,8 @@ class TaskListView extends ItemView {
 							fm.priority = values.priority;
 							fm.scheduled = values.scheduled || undefined;
 							fm.due = values.due || undefined;
+							fm.time = values.time || undefined;
+							fm.end = values.end || undefined;
 							fm.project = project;
 							fm.goal = values.goal || undefined;
 							fm.recurrence = combineRecurrence(values) || undefined;
@@ -2256,6 +2327,24 @@ class TaskListView extends ItemView {
 		select.onchange = () => this.setViewProject(select.value);
 	}
 
+	// Done rows (including every materialized done occurrence of a series,
+	// which would otherwise pile up forever) are only kept for 7 days after
+	// they were last touched: frontmatter `dateModified` if present, else the
+	// row's due date, else the file's mtime. Not applied in "today" mode,
+	// whose own matchesToday rule already limits done rows to the shown day.
+	private hideOldDone(rows: TaskRow[], todayKey: string, statuses: StatusConfig[]): TaskRow[] {
+		const doneId = doneStatusId(statuses);
+		const cutoff = toDateKey(addDays(parseDateKey(todayKey), -7));
+		return rows.filter((row) => {
+			if (rowStatusId(row, statuses) !== doneId) return true;
+			const fm = this.app.metadataCache.getFileCache(row.display.file)?.frontmatter as { dateModified?: string } | undefined;
+			const touched = fm?.dateModified
+				? String(fm.dateModified).slice(0, 10)
+				: row.effectiveDue ?? toDateKey(new Date(row.display.file.stat.mtime));
+			return touched >= cutoff;
+		});
+	}
+
 	private render() {
 		try {
 			this.renderInner();
@@ -2304,6 +2393,7 @@ class TaskListView extends ItemView {
 		if (viewMode !== "routines" && !this.plugin.settings.showRecurringTasks) {
 			rows = rows.filter((row) => !isRecurringRow(row));
 		}
+		if (viewMode !== "today") rows = this.hideOldDone(rows, todayKey, statuses);
 
 		this.renderModeBar(container, distinctProjectOptions(this.app, this.tasks));
 
@@ -2467,6 +2557,12 @@ class TaskListView extends ItemView {
 				text: row.effectiveDue,
 			});
 		}
+		if (row.display.time) {
+			meta.createSpan({
+				cls: "plain-tasks-chip plain-tasks-chip-time",
+				text: row.display.time + (row.display.end ? `–${row.display.end}` : ""),
+			});
+		}
 		if (row.display.project) this.renderProjectChip(meta, row.display.project, row.display.file.path);
 		if (row.display.goal) this.renderGoalChip(meta, row.display.goal, row.display.file.path);
 
@@ -2535,6 +2631,12 @@ class TaskListView extends ItemView {
 			meta.createSpan({
 				cls: "plain-tasks-chip plain-tasks-chip-date" + (overdue ? " is-overdue" : ""),
 				text: row.effectiveDue,
+			});
+		}
+		if (row.display.time) {
+			meta.createSpan({
+				cls: "plain-tasks-chip plain-tasks-chip-time",
+				text: row.display.time + (row.display.end ? `–${row.display.end}` : ""),
 			});
 		}
 		if (row.display.project) this.renderProjectChip(meta, row.display.project, row.display.file.path);

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.11.0
+
+- Added: optional `time` and `end` fields (`HH:mm`, same names and format as Plain Calendar's events) - set in the create/edit dialog, shown as a time chip (`09:00–10:30`) next to the due date. Within the same day, timed tasks sort first, in time order. Carried over to series exceptions and to the new master when splitting a series
+- Changed: done tasks are hidden outside the Today view once their last change (`dateModified`, else due date, else file modification time) is more than 7 days ago - completed series occurrences no longer pile up in the done column forever
+- Changed: the overdue date chip is now a solid red badge instead of a tinted one
+- Fixed: creating a task note with the same date and title as an existing one (e.g. "this task only" on a series' very first occurrence) failed with "file already exists" - it now gets a numbered filename
+- Fixed: titles containing `: ` (e.g. "Call: Bob") produced invalid frontmatter, so the new task silently never showed up; titles with ` #` were cut off there, and `project`/`goal` wikilinks were stored as nested YAML lists instead of link strings. These values are now written quoted
+- Fixed: a monthly series due on the 29th-31st (or yearly on Feb 29) showed an overflowed date (Jan 31 -> Mar 3) as its next occurrence, which the scope actions didn't recognise; months without that day are now skipped
+- Fixed: an occurrence moved to another day via "this task only" kept showing (and being marked overdue) on its original date, and appeared on both days when browsing days in Today mode. "This and all following" on such an occurrence acted on the whole series instead - deleting the entire series
+- Fixed: dropping a Kanban card back onto its own column no longer rewrites the note
+
 ## 1.10.1
 
 - Fixed: the `goal` field looked for goal notes under `01_Me/goals/`, a folder that never existed in the reference vault - goals actually live in `03_Goals/` (see `98_Rules/templates/goal.md`). The field never resolved anything in 1.10.0; goal lookup now points at `03_Goals/`
